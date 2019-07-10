@@ -1,6 +1,4 @@
-/*
- * Copyright 2019 Joyent, Inc.
- */
+// Copyright 2019 Joyent, Inc.
 
 #[macro_use]
 extern crate clap;
@@ -102,7 +100,6 @@ where
 
     match mclient.sql(query.as_str(), vec![], r#"{"timeout": 10000}"#, |a| {
         let id: String = serde_json::from_value(a[0][id_name].clone()).unwrap();
-        dbg!(id);
         query_handler(a, shard_num, handler)
     }) {
         Ok(()) => Ok(()),
