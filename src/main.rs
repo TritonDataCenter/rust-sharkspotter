@@ -2,6 +2,8 @@
 
 extern crate sharkspotter;
 
+
+use slog::{o, Logger, Drain};
 use std::collections::HashMap;
 use std::env;
 use std::fs::OpenOptions;
@@ -9,6 +11,7 @@ use std::io::prelude::*;
 use std::io::Error;
 use std::path::Path;
 use std::process;
+use std::sync::Mutex;
 
 use sharkspotter::config::Config;
 
@@ -17,6 +20,12 @@ fn main() -> Result<(), Error> {
         eprintln!("Error parsing args: {}", err);
         process::exit(1);
     });
+
+    let plain = slog_term::PlainSyncDecorator::new(std::io::stdout());
+    let log = Logger::root(
+        Mutex::new(slog_term::FullFormat::new(plain).build()).fuse(),
+        o!("build-id" => "0.1.0"),
+    );
 
     let mut file_map = HashMap::new();
 
@@ -35,7 +44,7 @@ fn main() -> Result<(), Error> {
 
         file_map.insert(i, file);
     }
-    sharkspotter::run(&conf, |mobj, shard| {
+    sharkspotter::run(&conf, log, |mobj, shard| {
         println!("{} | {}", shard, mobj.object_id);
         let file = file_map.get_mut(&shard).unwrap();
         let buf = serde_json::to_string(&mobj)?;

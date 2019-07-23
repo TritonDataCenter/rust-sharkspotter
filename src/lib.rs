@@ -9,9 +9,9 @@ use libmanta::moray::MantaObject;
 use moray::client::MorayClient;
 use serde::Deserialize;
 use serde_json::{self, Value};
+use slog::Logger;
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
-use std::str::FromStr;
 use trust_dns_resolver::Resolver;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -114,13 +114,14 @@ fn iter_ids<F>(
     id_name: &str,
     moray_socket: &String,
     conf: &config::Config,
+    log: Logger,
     shard_num: u32,
     mut handler: F,
 ) -> Result<(), Error>
 where
     F: FnMut(MantaObject, u32) -> Result<(), Error>,
 {
-    let mut mclient = MorayClient::from_str(moray_socket.as_str()).unwrap();
+    let mut mclient = MorayClient::from_str(moray_socket.as_str(), log, None).unwrap();
     let mut start_id = conf.begin;
     let mut end_id = conf.begin + conf.chunk_size - 1;
     let largest_id = match find_largest_id_value(&mut mclient, id_name) {
@@ -148,16 +149,6 @@ where
             &mut handler,
         ) {
             Ok(()) => (),
-            Err(ref e) if e.kind() == ErrorKind::UnexpectedEof => {
-                eprintln!("Reconnecting!");
-                mclient = match mclient.reconnect() {
-                    Ok(client) => client,
-                    Err(e) => {
-                        eprintln!("Failed to reconnect: {}", e);
-                        return Err(e);
-                    }
-                };
-            }
             Err(e) => return Err(e),
         };
 
@@ -182,7 +173,7 @@ where
     Ok(())
 }
 
-pub fn run<F>(conf: &config::Config, mut handler: F) -> Result<(), Error>
+pub fn run<F>(conf: &config::Config, log: Logger, mut handler: F) -> Result<(), Error>
 where
     F: FnMut(MantaObject, u32) -> Result<(), Error>,
 {
@@ -197,8 +188,8 @@ where
 
         let moray_socket = format!("{}:{}", moray_ip.to_string(), 2021);
 
-        iter_ids("_id", &moray_socket, &conf, i, &mut handler)?;
-        iter_ids("_idx", &moray_socket, &conf, i, &mut handler)?;
+        iter_ids("_id", &moray_socket, &conf, log.clone(), i, &mut handler)?;
+        iter_ids("_idx", &moray_socket, &conf, log.clone(), i, &mut handler)?;
     }
 
     Ok(())
