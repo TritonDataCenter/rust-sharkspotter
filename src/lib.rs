@@ -99,7 +99,6 @@ where
     );
 
     match mclient.sql(query.as_str(), vec![], r#"{"timeout": 10000}"#, |a| {
-        let id: String = serde_json::from_value(a[0][id_name].clone()).unwrap();
         query_handler(a, shard_num, handler)
     }) {
         Ok(()) => Ok(()),
@@ -112,7 +111,7 @@ where
 
 fn iter_ids<F>(
     id_name: &str,
-    moray_socket: &String,
+    moray_socket: &str,
     conf: &config::Config,
     log: Logger,
     shard_num: u32,
@@ -121,7 +120,7 @@ fn iter_ids<F>(
 where
     F: FnMut(MantaObject, u32) -> Result<(), Error>,
 {
-    let mut mclient = MorayClient::from_str(moray_socket.as_str(), log, None).unwrap();
+    let mut mclient = MorayClient::from_str(moray_socket, log, None).unwrap();
     let mut start_id = conf.begin;
     let mut end_id = conf.begin + conf.chunk_size - 1;
     let largest_id = match find_largest_id_value(&mut mclient, id_name) {
@@ -173,7 +172,11 @@ where
     Ok(())
 }
 
-pub fn run<F>(conf: &config::Config, log: Logger, mut handler: F) -> Result<(), Error>
+pub fn run<F>(
+    conf: &config::Config,
+    log: Logger,
+    mut handler: F,
+) -> Result<(), Error>
 where
     F: FnMut(MantaObject, u32) -> Result<(), Error>,
 {

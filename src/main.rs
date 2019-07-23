@@ -2,8 +2,7 @@
 
 extern crate sharkspotter;
 
-
-use slog::{o, Logger, Drain};
+use slog::{o, Drain, Logger};
 use std::collections::HashMap;
 use std::env;
 use std::fs::OpenOptions;
@@ -49,6 +48,7 @@ fn main() -> Result<(), Error> {
         let file = file_map.get_mut(&shard).unwrap();
         let buf = serde_json::to_string(&mobj)?;
         file.write_all(buf.as_bytes())?; // TODO: match
+        file.write_all(b"\n")?;
 
         Ok(())
     })
