@@ -28,11 +28,20 @@ OPTIONS:
     -s, --shark <STORAGE_ID>          Find objects that belong to this shark
 ```
 
+## Example
+```
+$ cargo run -- --domain east.joyent.us --shark 1.stor -M 1 -m 1
+$ json -f shard_1_1.stor.objs -g
+```
+
+__This can be a big file so [json](https://github.com/trentm/json) may struggle with it__
+
 ## Development
 
 Before integration run:
 ```
 cargo fmt
+cargo clippy
 ```
 
 and 

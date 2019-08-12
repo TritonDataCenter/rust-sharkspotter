@@ -80,26 +80,24 @@ where
     Ok(())
 }
 
+fn chunk_query(id_name: &str, begin: u64, end: u64, count: u64) -> String {
+    format!(
+        "SELECT * FROM manta WHERE {} >= {} AND \
+         {} <= {} AND type = 'object' limit {};",
+        id_name, begin, id_name, end, count
+    )
+}
+
 fn read_chunk<F>(
     mclient: &mut MorayClient,
-    id_name: &str,
-    begin: u64,
-    end: u64,
-    count: u64,
+    query: &str,
     shard_num: u32,
     handler: &mut F,
 ) -> Result<(), Error>
 where
     F: FnMut(MantaObject, u32) -> Result<(), Error>,
 {
-    let query = format!(
-        "SELECT * FROM manta WHERE {} >= {} AND \
-         {} <= {} AND type = 'object' limit {};",
-        id_name, begin, id_name, end, count
-    );
-
-    match mclient.sql(query.as_str(), vec![], r#"{"timeout": 10000}"#, |a| {
-        let id: String = serde_json::from_value(a[0][id_name].clone()).unwrap();
+    match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
         query_handler(a, shard_num, handler)
     }) {
         Ok(()) => Ok(()),
@@ -112,7 +110,7 @@ where
 
 fn iter_ids<F>(
     id_name: &str,
-    moray_socket: &String,
+    moray_socket: &str,
     conf: &config::Config,
     log: Logger,
     shard_num: u32,
@@ -121,7 +119,7 @@ fn iter_ids<F>(
 where
     F: FnMut(MantaObject, u32) -> Result<(), Error>,
 {
-    let mut mclient = MorayClient::from_str(moray_socket.as_str(), log, None).unwrap();
+    let mut mclient = MorayClient::from_str(moray_socket, log, None)?;
     let mut start_id = conf.begin;
     let mut end_id = conf.begin + conf.chunk_size - 1;
     let largest_id = match find_largest_id_value(&mut mclient, id_name) {
@@ -139,15 +137,9 @@ where
     }
 
     while remaining > 0 {
-        match read_chunk(
-            &mut mclient,
-            id_name,
-            start_id,
-            end_id,
-            conf.chunk_size,
-            shard_num,
-            &mut handler,
-        ) {
+        let query = chunk_query(id_name, start_id, end_id, conf.chunk_size);
+        match read_chunk(&mut mclient, query.as_str(), shard_num, &mut handler)
+        {
             Ok(()) => (),
             Err(e) => return Err(e),
         };
@@ -173,7 +165,11 @@ where
     Ok(())
 }
 
-pub fn run<F>(conf: &config::Config, log: Logger, mut handler: F) -> Result<(), Error>
+pub fn run<F>(
+    conf: &config::Config,
+    log: Logger,
+    mut handler: F,
+) -> Result<(), Error>
 where
     F: FnMut(MantaObject, u32) -> Result<(), Error>,
 {
