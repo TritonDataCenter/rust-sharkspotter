@@ -41,7 +41,7 @@ fn main() -> Result<(), Error> {
 
         file_map.insert(i, file);
     }
-    sharkspotter::run(&conf, log, |mobj, shard| {
+    sharkspotter::run(conf, log, |mobj, shard| {
         println!("{} | {}", shard, mobj.object_id);
         let file = file_map.get_mut(&shard).unwrap();
         let buf = serde_json::to_string(&mobj)?;
