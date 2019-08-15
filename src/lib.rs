@@ -7,9 +7,10 @@ pub mod config;
 
 use libmanta::moray::MantaObject;
 use moray::client::MorayClient;
+use moray::objects as moray_objects;
 use serde::Deserialize;
 use serde_json::{self, Value};
-use slog::Logger;
+use slog::{debug, error, warn, Logger};
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
 use trust_dns_resolver::Resolver;
@@ -62,6 +63,7 @@ fn find_largest_id_value(
 fn query_handler<F>(
     val: &Value,
     shard_num: u32,
+    shark: &str,
     handler: &mut F,
 ) -> Result<(), Error>
 where
@@ -74,6 +76,11 @@ where
         serde_json::from_value(val[0]["_value"].clone()).unwrap();
     let manta_obj: MantaObject =
         serde_json::from_str(manta_str.as_str()).unwrap();
+
+    // Filter on shark
+    if !manta_obj.sharks.iter().any(|s| s.manta_storage_id == shark) {
+        return Ok(());
+    }
 
     handler(manta_obj, shard_num)?;
 
@@ -92,13 +99,14 @@ fn read_chunk<F>(
     mclient: &mut MorayClient,
     query: &str,
     shard_num: u32,
+    shark: &str,
     handler: &mut F,
 ) -> Result<(), Error>
 where
     F: FnMut(MantaObject, u32) -> Result<(), Error>,
 {
     match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
-        query_handler(a, shard_num, handler)
+        query_handler(a, shard_num, shark, handler)
     }) {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -119,13 +127,14 @@ fn iter_ids<F>(
 where
     F: FnMut(MantaObject, u32) -> Result<(), Error>,
 {
-    let mut mclient = MorayClient::from_str(moray_socket, log, None)?;
+    let mut mclient = MorayClient::from_str(moray_socket, log.clone(), None)?;
+
     let mut start_id = conf.begin;
     let mut end_id = conf.begin + conf.chunk_size - 1;
     let largest_id = match find_largest_id_value(&mut mclient, id_name) {
         Ok(id) => id,
         Err(e) => {
-            eprintln!("Error finding largest ID: {}, using 0", e);
+            error!(&log, "Error finding largest ID: {}, using 0", e);
             0
         }
     };
@@ -138,8 +147,13 @@ where
 
     while remaining > 0 {
         let query = chunk_query(id_name, start_id, end_id, conf.chunk_size);
-        match read_chunk(&mut mclient, query.as_str(), shard_num, &mut handler)
-        {
+        match read_chunk(
+            &mut mclient,
+            query.as_str(),
+            shard_num,
+            &conf.shark,
+            &mut handler,
+        ) {
             Ok(()) => (),
             Err(e) => return Err(e),
         };
@@ -156,33 +170,90 @@ where
 
         remaining = largest_id - start_id + 1;
 
-        println!(
+        debug!(
+            &log,
             "start_id: {} | end_id: {} | remaining: {}",
-            start_id, end_id, remaining
+            start_id,
+            end_id,
+            remaining
         );
     }
 
     Ok(())
 }
 
+fn lookup_ip_str(host: &str) -> Result<String, Error> {
+    let resolver = Resolver::from_system_conf()?;
+    let response = resolver.lookup_ip(host)?;
+    let ip: Vec<IpAddr> = response.iter().collect();
+
+    Ok(ip[0].to_string())
+}
+
+fn validate_shark(shark: &str, log: Logger, domain: &str) -> Result<(), Error> {
+    let shard1_moray = format!("1.moray.{}", domain);
+    let moray_ip = lookup_ip_str(shard1_moray.as_str())?;
+    let moray_socket = format!("{}:{}", moray_ip, 2021);
+    let mut mclient =
+        MorayClient::from_str(moray_socket.as_str(), log.clone(), None)?;
+
+    let filter = format!("manta_storage_id={}", shark);
+    let opts = moray_objects::MethodOptions::default();
+    let mut count = 0;
+    mclient.find_objects("manta_storage", filter.as_str(), &opts, |_| {
+        count += 1;
+        Ok(())
+    })?;
+
+    if count > 1 {
+        return Err(Error::new(
+            ErrorKind::Other,
+            format!("More than one shark with name \"{}\" found", shark),
+        ));
+    }
+
+    if count == 0 {
+        return Err(Error::new(
+            ErrorKind::Other,
+            format!("No shark with name \"{}\" found", shark),
+        ));
+    }
+
+    Ok(())
+}
+
 pub fn run<F>(
-    conf: &config::Config,
+    mut conf: config::Config,
     log: Logger,
     mut handler: F,
 ) -> Result<(), Error>
 where
     F: FnMut(MantaObject, u32) -> Result<(), Error>,
 {
-    let resolver = Resolver::from_system_conf().unwrap();
+    if !conf.shark.contains(conf.domain.as_str()) {
+        let new_shark = format!("{}.{}", conf.shark, conf.domain);
+        warn!(log,
+            "Domain \"{}\" not found in storage node string:\"{}\", using \"{}\"",
+            conf.domain,
+            conf.shark,
+            new_shark
+            );
+
+        conf.shark = new_shark;
+    }
+
+    match validate_shark(&conf.shark, log.clone(), &conf.domain) {
+        Ok(()) => (),
+        Err(e) => {
+            error!(log, "{}", e);
+            return Err(e);
+        }
+    }
 
     for i in conf.min_shard..=conf.max_shard {
         let moray_host = format!("{}.moray.{}", i, conf.domain);
-        let response = resolver.lookup_ip(moray_host.as_str())?;
-
-        let moray_ip: Vec<IpAddr> = response.iter().collect();
-        let moray_ip = moray_ip[0];
-
-        let moray_socket = format!("{}:{}", moray_ip.to_string(), 2021);
+        let moray_ip = lookup_ip_str(moray_host.as_str())?;
+        let moray_socket = format!("{}:{}", moray_ip, 2021);
 
         iter_ids("_id", &moray_socket, &conf, log.clone(), i, &mut handler)?;
         iter_ids("_idx", &moray_socket, &conf, log.clone(), i, &mut handler)?;
