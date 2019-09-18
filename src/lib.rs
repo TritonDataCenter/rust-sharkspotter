@@ -67,22 +67,26 @@ fn query_handler<F>(
     handler: &mut F,
 ) -> Result<(), Error>
 where
-    F: FnMut(MantaObject, u32) -> Result<(), Error>,
+    F: FnMut(MantaObject, u32, String) -> Result<(), Error>,
 {
     // TODO:
     // - are we sure this is always only 1 element?
     // - Handle an object that doesn't have a '_value' without panicking?
-    let manta_str: String =
-        serde_json::from_value(val[0]["_value"].clone()).unwrap();
+
+    let etag: String =
+        serde_json::from_value(val[0]["_etag"].clone()).expect("etag");
+
+    let manta_str: String = serde_json::from_value(val[0]["_value"].clone())
+        .expect("manta object string");
     let manta_obj: MantaObject =
-        serde_json::from_str(manta_str.as_str()).unwrap();
+        serde_json::from_str(manta_str.as_str()).expect("manta object value");
 
     // Filter on shark
     if !manta_obj.sharks.iter().any(|s| s.manta_storage_id == shark) {
         return Ok(());
     }
 
-    handler(manta_obj, shard_num)?;
+    handler(manta_obj, shard_num, etag)?;
 
     Ok(())
 }
@@ -103,7 +107,7 @@ fn read_chunk<F>(
     handler: &mut F,
 ) -> Result<(), Error>
 where
-    F: FnMut(MantaObject, u32) -> Result<(), Error>,
+    F: FnMut(MantaObject, u32, String) -> Result<(), Error>,
 {
     match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
         query_handler(a, shard_num, shark, handler)
@@ -125,7 +129,7 @@ fn iter_ids<F>(
     mut handler: F,
 ) -> Result<(), Error>
 where
-    F: FnMut(MantaObject, u32) -> Result<(), Error>,
+    F: FnMut(MantaObject, u32, String) -> Result<(), Error>,
 {
     let mut mclient = MorayClient::from_str(moray_socket, log.clone(), None)?;
 
@@ -228,7 +232,7 @@ pub fn run<F>(
     mut handler: F,
 ) -> Result<(), Error>
 where
-    F: FnMut(MantaObject, u32) -> Result<(), Error>,
+    F: FnMut(MantaObject, u32, String) -> Result<(), Error>,
 {
     if !conf.shark.contains(conf.domain.as_str()) {
         let new_shark = format!("{}.{}", conf.shark, conf.domain);
