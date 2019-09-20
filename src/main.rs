@@ -41,8 +41,9 @@ fn main() -> Result<(), Error> {
 
         file_map.insert(i, file);
     }
-    sharkspotter::run(conf, log, |mobj, shard| {
-        println!("{} | {}", shard, mobj.object_id);
+    sharkspotter::run(conf, log, |mobj, shard, etag| {
+        println!("{} | {} | {}", shard, mobj.object_id, etag);
+
         let file = file_map.get_mut(&shard).unwrap();
         let buf = serde_json::to_string(&mobj)?;
         file.write_all(buf.as_bytes())?; // TODO: match
