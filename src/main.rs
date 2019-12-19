@@ -21,17 +21,6 @@ fn write_mobj_to_file(file: &mut File, moray_obj: Value) -> Result<(), Error> {
         }
     };
 
-    /*
-    let val: &Value = match moray_obj.get("_value") {
-        Some(v) => v,
-        None => {
-            eprintln!("Missing '_value' in Moray entry {:#?}", moray_obj);
-            return Ok(());
-        }
-    };
-    */
-
-    //let object_id = match val.get("objectId") {
     let object_id = match manta_obj.get("objectId") {
         Some(oid) => match serde_json::to_string(oid) {
             Ok(o) => o,

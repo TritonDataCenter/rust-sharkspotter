@@ -142,35 +142,6 @@ where
             return _log_return_error(log, &e);
         }
     };
-    /*(
-    let _value: Value = match moray_value.get("_value") {
-        Some(val) => {
-            let val_clone = val.clone();
-            let str_val = match val_clone.as_str() {
-                Some(s) => s,
-                None => {
-                    let msg = format!("Could not format entry as string {:#?}",
-                                      val);
-                    return _log_return_error(log, &msg);
-                }
-            };
-
-            match serde_json::from_str(str_val) {
-                Ok(o) => o,
-                Err(e) => {
-                    let msg = format!("Could not format entry as object {:#?}",
-                                      val);
-                    return _log_return_error(log, &msg);
-                }
-            }
-        },
-        None => {
-            let msg =
-                format!("Missing '_value' in Moray entry {:#?}", moray_value);
-            return _log_return_error(log, &msg);
-        }
-    };
-    */
 
     let sharks: Vec<MantaObjectShark> = match _value.get("sharks") {
         Some(s) => {
@@ -194,22 +165,6 @@ where
             return _log_return_error(log, &msg);
         }
     };
-
-    /*
-    let manta_obj: MantaObject = match serde_json::from_value(
-        manta_value.clone())
-    {
-        Ok(mo) => mo,
-        Err(e) => {
-            let msg = format!(
-                "Could not deserialize manta value {:#?}. ({})",
-                manta_value,
-                e
-            );
-            return _log_return_error(log, &msg);
-        }
-    };
-    */
 
     // Filter on shark
     if !sharks.iter().any(|s| s.manta_storage_id == shark) {
