@@ -12,6 +12,7 @@ pub struct Config {
     pub chunk_size: u64,
     pub begin: u64,
     pub end: u64,
+    pub output_file: Option<String>,
 }
 
 impl Default for Config {
@@ -24,6 +25,7 @@ impl Default for Config {
             begin: 0,
             end: 0,
             chunk_size: 100,
+            output_file: None,
         }
     }
 }
@@ -81,6 +83,12 @@ impl Config {
                 .long("end")
                 .value_name("INDEX")
                 .help("index to stop scanning at (default: 0)")
+                .takes_value(true))
+            .arg(Arg::with_name("output_file")
+                .short("f")
+                .long("file")
+                .value_name("FILE_NAME")
+                .help("output filename (default shard_<num>_<shark>.objs")
                 .takes_value(true))
             .get_matches();
 

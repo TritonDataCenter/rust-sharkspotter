@@ -5,7 +5,7 @@ extern crate clap;
 
 pub mod config;
 
-use libmanta::moray::{MantaObject, MantaObjectShark};
+use libmanta::moray::MantaObjectShark;
 use moray::client::MorayClient;
 use moray::objects as moray_objects;
 use serde::Deserialize;
@@ -75,14 +75,16 @@ fn query_handler<F>(
 where
     F: FnMut(Value, u32) -> Result<(), Error>,
 {
-
     match val.as_array() {
         Some(v) => {
             if v.len() > 1 {
-                warn!(log, "Expected 1 value, got {}.  Using first entry.",
-                      v.len());
+                warn!(
+                    log,
+                    "Expected 1 value, got {}.  Using first entry.",
+                    v.len()
+                );
             }
-        },
+        }
         None => {
             return _log_return_error(log, "Entry is not an array");
             /*
@@ -104,8 +106,7 @@ where
         Err(e) => {
             let msg = format!(
                 "Could not deserialize moray value {:#?}. ({})",
-                moray_value,
-                e
+                moray_value, e
             );
             return _log_return_error(log, &msg);
         }
@@ -114,10 +115,10 @@ where
     let _value = match moray_value.get("_value") {
         Some(val) => val,
         None => {
-            let msg = format!("Missing '_value' in Moray entry {:#?}",
-                moray_value);
+            let msg =
+                format!("Missing '_value' in Moray entry {:#?}", moray_value);
             return _log_return_error(log, &msg);
-        },
+        }
     };
 
     let sharks: Vec<MantaObjectShark> = match _value.get("sharks") {
@@ -131,11 +132,12 @@ where
                 Err(e) => {
                     let msg = format!(
                         "Could not deserialize sharks value {:#?}. ({})",
-                        s, e);
+                        s, e
+                    );
                     return _log_return_error(log, &msg);
                 }
             }
-        },
+        }
         None => {
             let msg = format!("Missing 'sharks' field {:#?}", _value);
             return _log_return_error(log, &msg);

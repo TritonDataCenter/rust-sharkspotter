@@ -1,29 +1,50 @@
 // Copyright 2019 Joyent, Inc.
 
+use serde_json::Value;
+use sharkspotter::config::Config;
 use slog::{o, Drain, Logger};
 use std::collections::HashMap;
 use std::env;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::io::Error;
 use std::path::Path;
 use std::process;
 use std::sync::Mutex;
 
-use sharkspotter::config::Config;
+fn write_mobj_to_file(file: &mut File, moray_obj: Value) -> Result<(), Error> {
+    let val: &Value = match moray_obj.get("_value") {
+        Some(v) => v,
+        None => {
+            eprintln!("Missing '_value' in Moray entry {:#?}", moray_obj);
+            return Ok(());
+        }
+    };
 
-fn main() -> Result<(), Error> {
-    let conf = Config::from_args(env::args()).unwrap_or_else(|err| {
-        eprintln!("Error parsing args: {}", err);
-        process::exit(1);
-    });
+    let object_id = match val.get("objectId") {
+        Some(oid) => match serde_json::to_string(oid) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("Could not deserialize objectId {:#?}, {}", val, e);
+                return Ok(());
+            }
+        },
+        None => {
+            eprintln!("Could not get objectId from value {:#?}", val);
+            return Ok(());
+        }
+    };
 
-    let plain = slog_term::PlainSyncDecorator::new(std::io::stdout());
-    let log = Logger::root(
-        Mutex::new(slog_term::FullFormat::new(plain).build()).fuse(),
-        o!("build-id" => "0.1.0"),
-    );
+    println!("{}", object_id);
 
+    let buf = serde_json::to_string(&val)?;
+    file.write_all(buf.as_bytes())?; // TODO: match
+    file.write_all(b"\n")?;
+
+    Ok(())
+}
+
+fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
     let mut file_map = HashMap::new();
 
     for i in conf.min_shard..=conf.max_shard {
@@ -41,14 +62,48 @@ fn main() -> Result<(), Error> {
 
         file_map.insert(i, file);
     }
-    sharkspotter::run(conf, log, |mobj, shard, etag| {
-        println!("{} | {} | {}", shard, mobj.object_id, etag);
 
+    sharkspotter::run(conf, log, |moray_obj, shard| {
         let file = file_map.get_mut(&shard).unwrap();
-        let buf = serde_json::to_string(&mobj)?;
-        file.write_all(buf.as_bytes())?; // TODO: match
-        file.write_all(b"\n")?;
 
-        Ok(())
+        write_mobj_to_file(file, moray_obj)
     })
+}
+
+fn run_with_user_file(
+    filename: String,
+    conf: Config,
+    log: Logger,
+) -> Result<(), Error> {
+    let path = Path::new(filename.as_str());
+    let mut file = match OpenOptions::new().append(true).create(true).open(path)
+    {
+        Err(e) => {
+            panic!("Couldn't create output file '{}': {}", path.display(), e)
+        }
+        Ok(file) => file,
+    };
+
+    sharkspotter::run(conf, log, |moray_obj, _| {
+        write_mobj_to_file(&mut file, moray_obj)
+    })
+}
+
+fn main() -> Result<(), Error> {
+    let conf = Config::from_args(env::args()).unwrap_or_else(|err| {
+        eprintln!("Error parsing args: {}", err);
+        process::exit(1);
+    });
+
+    let plain = slog_term::PlainSyncDecorator::new(std::io::stdout());
+    let log = Logger::root(
+        Mutex::new(slog_term::FullFormat::new(plain).build()).fuse(),
+        o!("build-id" => "0.1.0"),
+    );
+
+    let filename = conf.output_file.clone();
+    match filename {
+        Some(fname) => run_with_user_file(fname, conf, log),
+        None => run_with_file_map(conf, log),
+    }
 }
