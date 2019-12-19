@@ -13,6 +13,15 @@ use std::process;
 use std::sync::Mutex;
 
 fn write_mobj_to_file(file: &mut File, moray_obj: Value) -> Result<(), Error> {
+    let manta_obj = match sharkspotter::manta_obj_from_moray_obj(&moray_obj) {
+        Ok(mo) => mo,
+        Err(e) => {
+            eprintln!("{}", e);
+            return Ok(())
+        }
+    };
+
+    /*
     let val: &Value = match moray_obj.get("_value") {
         Some(v) => v,
         None => {
@@ -20,24 +29,27 @@ fn write_mobj_to_file(file: &mut File, moray_obj: Value) -> Result<(), Error> {
             return Ok(());
         }
     };
+    */
 
-    let object_id = match val.get("objectId") {
+    //let object_id = match val.get("objectId") {
+    let object_id = match manta_obj.get("objectId") {
         Some(oid) => match serde_json::to_string(oid) {
             Ok(o) => o,
             Err(e) => {
-                eprintln!("Could not deserialize objectId {:#?}, {}", val, e);
+                eprintln!("Could not deserialize objectId {:#?}, {}",
+                    manta_obj, e);
                 return Ok(());
             }
         },
         None => {
-            eprintln!("Could not get objectId from value {:#?}", val);
+            eprintln!("Could not get objectId from value {:#?}", manta_obj);
             return Ok(());
         }
     };
 
     println!("{}", object_id);
 
-    let buf = serde_json::to_string(&val)?;
+    let buf = serde_json::to_string(&manta_obj)?;
     file.write_all(buf.as_bytes())?; // TODO: match
     file.write_all(b"\n")?;
 

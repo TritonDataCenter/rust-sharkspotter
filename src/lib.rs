@@ -64,6 +64,33 @@ fn _log_return_error(log: &Logger, msg: &str) -> Result<(), Error> {
     Err(Error::new(ErrorKind::Other, msg))
 }
 
+pub fn manta_obj_from_moray_obj(moray_obj: &Value) -> Result<Value, String> {
+    match moray_obj.get("_value") {
+        Some(val) => {
+            let val_clone = val.clone();
+            let str_val = match val_clone.as_str() {
+                Some(s) => s,
+                None => {
+                    return Err(format!("Could not format entry as string {:#?}",
+                        val));
+                }
+            };
+
+            match serde_json::from_str(str_val) {
+                Ok(o) => o,
+                Err(e) => {
+                    return Err(format!("Could not format entry as object {:#?}",
+                        val));
+                }
+            }
+        },
+        None => {
+            return Err(format!("Missing '_value' in Moray entry {:#?}",
+                moray_obj));
+        }
+    }
+}
+
 // TODO: add tests for this function
 fn query_handler<F>(
     log: &Logger,
@@ -87,10 +114,6 @@ where
         }
         None => {
             return _log_return_error(log, "Entry is not an array");
-            /*
-            error!(log, "Entry is not an array");
-            return Err(Error::new(ErrorKind::Other, "Entry is not an array"));
-            */
         }
     }
 
@@ -112,6 +135,13 @@ where
         }
     };
 
+    let _value = match manta_obj_from_moray_obj(moray_value) {
+        Ok(v) => v,
+        Err(e) => {
+            return _log_return_error(log, &e);
+        }
+    };
+    /*(
     let _value: Value = match moray_value.get("_value") {
         Some(val) => {
             let val_clone = val.clone();
@@ -139,6 +169,7 @@ where
             return _log_return_error(log, &msg);
         }
     };
+    */
 
     let sharks: Vec<MantaObjectShark> = match _value.get("sharks") {
         Some(s) => {
