@@ -113,7 +113,16 @@ where
     };
 
     let _value = match moray_value.get("_value") {
-        Some(val) => val,
+        Some(val) => match val.as_object() {
+            Some(o) => o,
+            None => {
+                let msg = format!(
+                    "Could not format entry as object {:#?}",
+                    moray_value
+                );
+                return _log_return_error(log, &msg);
+            }
+        },
         None => {
             let msg =
                 format!("Missing '_value' in Moray entry {:#?}", moray_value);
