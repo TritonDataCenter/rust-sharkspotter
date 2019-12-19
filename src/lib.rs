@@ -112,15 +112,25 @@ where
         }
     };
 
-    let _value = match moray_value.get("_value") {
-        Some(val) => match val.as_object() {
-            Some(o) => o,
-            None => {
-                let msg = format!(
-                    "Could not format entry as object {:#?}",
-                    moray_value
-                );
-                return _log_return_error(log, &msg);
+    let _value: Value = match moray_value.get("_value") {
+        Some(val) => {
+            let val_clone = val.clone();
+            let str_val = match val_clone.as_str() {
+                Some(s) => s,
+                None => {
+                    let msg = format!("Could not format entry as string {:#?}",
+                                      val);
+                    return _log_return_error(log, &msg);
+                }
+            };
+
+            match serde_json::from_str(str_val) {
+                Ok(o) => o,
+                Err(e) => {
+                    let msg = format!("Could not format entry as object {:#?}",
+                                      val);
+                    return _log_return_error(log, &msg);
+                }
             }
         },
         None => {
