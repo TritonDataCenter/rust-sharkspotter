@@ -114,6 +114,10 @@ impl Config {
             config.chunk_size = chunk_size;
         }
 
+        if let Ok(output_file) = value_t!(matches, "output_file", String) {
+            config.output_file = Some(output_file);
+        }
+
         config.domain = matches.value_of("domain").unwrap().to_string();
         config.shark = matches.value_of("shark").unwrap().to_string();
 
