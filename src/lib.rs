@@ -378,7 +378,7 @@ fn validate_shark(shark: &str, log: Logger, domain: &str) -> Result<(), Error> {
 /// Main entry point to for the sharkspotter library.  Callers need to
 /// provide a closure that takes a serde Value and a u32 shard number as its
 /// arguments.
-/// Sharkspotter works by first getting hte maximum and minimum _id and _idx
+/// Sharkspotter works by first getting the maximum and minimum _id and _idx
 /// for a given moray bucket (which is always "manta"), and then querying for
 /// entries in a user configurable chunk size.
 pub fn run<F>(
