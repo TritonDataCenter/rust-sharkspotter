@@ -5,7 +5,7 @@ extern crate clap;
 
 pub mod config;
 
-use libmanta::moray::MantaObject;
+use libmanta::moray::{MantaObject, MantaObjectShark};
 use moray::client::MorayClient;
 use moray::objects as moray_objects;
 use serde::Deserialize;
@@ -59,34 +59,111 @@ fn find_largest_id_value(
     Ok(ret)
 }
 
+fn _log_return_error(log: &Logger, msg: &str) -> Result<(), Error> {
+    error!(log, "{}", msg);
+    Err(Error::new(ErrorKind::Other, msg))
+}
+
 // TODO: add tests for this function
 fn query_handler<F>(
+    log: &Logger,
     val: &Value,
     shard_num: u32,
     shark: &str,
     handler: &mut F,
 ) -> Result<(), Error>
 where
-    F: FnMut(MantaObject, u32, String) -> Result<(), Error>,
+    F: FnMut(Value, u32) -> Result<(), Error>,
 {
-    // TODO:
-    // - are we sure this is always only 1 element?
-    // - Handle an object that doesn't have a '_value' without panicking?
 
-    let etag: String =
-        serde_json::from_value(val[0]["_etag"].clone()).expect("etag");
+    match val.as_array() {
+        Some(v) => {
+            if v.len() > 1 {
+                warn!(log, "Expected 1 value, got {}.  Using first entry.",
+                      v.len());
+            }
+        },
+        None => {
+            return _log_return_error(log, "Entry is not an array");
+            /*
+            error!(log, "Entry is not an array");
+            return Err(Error::new(ErrorKind::Other, "Entry is not an array"));
+            */
+        }
+    }
 
-    let manta_str: String = serde_json::from_value(val[0]["_value"].clone())
-        .expect("manta object string");
-    let manta_obj: MantaObject =
-        serde_json::from_str(manta_str.as_str()).expect("manta object value");
+    let moray_value = match val.get(0) {
+        Some(v) => v,
+        None => {
+            return _log_return_error(log, "Entry is empty");
+        }
+    };
+
+    let moray_object = match serde_json::from_value(moray_value.clone()) {
+        Ok(mo) => mo,
+        Err(e) => {
+            let msg = format!(
+                "Could not deserialize moray value {:#?}. ({})",
+                moray_value,
+                e
+            );
+            return _log_return_error(log, &msg);
+        }
+    };
+
+    let _value = match moray_value.get("_value") {
+        Some(val) => val,
+        None => {
+            let msg = format!("Missing '_value' in Moray entry {:#?}",
+                moray_value);
+            return _log_return_error(log, &msg);
+        },
+    };
+
+    let sharks: Vec<MantaObjectShark> = match _value.get("sharks") {
+        Some(s) => {
+            if !s.is_array() {
+                let msg = format!("Sharks are not in an array {:#?}", s);
+                return _log_return_error(log, &msg);
+            }
+            match serde_json::from_value::<Vec<MantaObjectShark>>(s.clone()) {
+                Ok(mos) => mos,
+                Err(e) => {
+                    let msg = format!(
+                        "Could not deserialize sharks value {:#?}. ({})",
+                        s, e);
+                    return _log_return_error(log, &msg);
+                }
+            }
+        },
+        None => {
+            let msg = format!("Missing 'sharks' field {:#?}", _value);
+            return _log_return_error(log, &msg);
+        }
+    };
+
+    /*
+    let manta_obj: MantaObject = match serde_json::from_value(
+        manta_value.clone())
+    {
+        Ok(mo) => mo,
+        Err(e) => {
+            let msg = format!(
+                "Could not deserialize manta value {:#?}. ({})",
+                manta_value,
+                e
+            );
+            return _log_return_error(log, &msg);
+        }
+    };
+    */
 
     // Filter on shark
-    if !manta_obj.sharks.iter().any(|s| s.manta_storage_id == shark) {
+    if !sharks.iter().any(|s| s.manta_storage_id == shark) {
         return Ok(());
     }
 
-    handler(manta_obj, shard_num, etag)?;
+    handler(moray_object, shard_num)?;
 
     Ok(())
 }
@@ -100,6 +177,7 @@ fn chunk_query(id_name: &str, begin: u64, end: u64, count: u64) -> String {
 }
 
 fn read_chunk<F>(
+    log: &Logger,
     mclient: &mut MorayClient,
     query: &str,
     shard_num: u32,
@@ -107,10 +185,10 @@ fn read_chunk<F>(
     handler: &mut F,
 ) -> Result<(), Error>
 where
-    F: FnMut(MantaObject, u32, String) -> Result<(), Error>,
+    F: FnMut(Value, u32) -> Result<(), Error>,
 {
     match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
-        query_handler(a, shard_num, shark, handler)
+        query_handler(log, a, shard_num, shark, handler)
     }) {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -129,7 +207,7 @@ fn iter_ids<F>(
     mut handler: F,
 ) -> Result<(), Error>
 where
-    F: FnMut(MantaObject, u32, String) -> Result<(), Error>,
+    F: FnMut(Value, u32) -> Result<(), Error>,
 {
     let mut mclient = MorayClient::from_str(moray_socket, log.clone(), None)?;
 
@@ -152,6 +230,7 @@ where
     while remaining > 0 {
         let query = chunk_query(id_name, start_id, end_id, conf.chunk_size);
         match read_chunk(
+            &log,
             &mut mclient,
             query.as_str(),
             shard_num,
@@ -232,7 +311,7 @@ pub fn run<F>(
     mut handler: F,
 ) -> Result<(), Error>
 where
-    F: FnMut(MantaObject, u32, String) -> Result<(), Error>,
+    F: FnMut(Value, u32) -> Result<(), Error>,
 {
     if !conf.shark.contains(conf.domain.as_str()) {
         let new_shark = format!("{}.{}", conf.shark, conf.domain);
