@@ -1,5 +1,15 @@
 // Copyright 2019 Joyent, Inc.
 
+// Run sharkspotter as a commandline tool.
+//
+// By default sharkspotter will place all manta object metadata into a file
+// in json format.  The file will be of the form:
+//      shard_<shard_num>_<storage_id_number>.objs
+//
+// This file can be parsed with the `json` tool which allows users to filter
+// on json object certain fields.
+
+
 use serde_json::Value;
 use sharkspotter::config::Config;
 use slog::{o, Drain, Logger};

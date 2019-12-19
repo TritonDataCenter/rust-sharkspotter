@@ -1,5 +1,44 @@
 // Copyright 2019 Joyent, Inc.
 
+// For reference here is a sample moray manta bucket entry.  The _value
+// portion is the manta object metadata.
+// {
+//   "bucket": "manta",
+//   "_count": 224574,
+//   "_etag": "7712D647",
+//   "_id": 114590,
+//   "_mtime": 1570611723074,
+//   "key": "/61368287-aa5b-6c0f-f3a9-931a228215e4/stor/logs/manatee-sitter/2019/10/09/08/07e023da.log",
+//   "_value": {
+//     "contentLength": 9099176,
+//     "contentMD5": "L9NrIZXTY37AYVZN9+gZ7w==",
+//     "contentType": "text/plain",
+//     "creator": "61368287-aa5b-6c0f-f3a9-931a228215e4",
+//     "dirname": "/61368287-aa5b-6c0f-f3a9-931a228215e4/stor/logs/manatee-sitter/2019/10/09/08",
+//     "etag": "2e08b069-d132-c25c-920c-945e3329e450",
+//     "headers": {},
+//     "key": "/61368287-aa5b-6c0f-f3a9-931a228215e4/stor/logs/manatee-sitter/2019/10/09/08/07e023da.log",
+//     "mtime": 1570611723062,
+//     "name": "07e023da.log",
+//     "objectId": "2e08b069-d132-c25c-920c-945e3329e450",
+//     "owner": "61368287-aa5b-6c0f-f3a9-931a228215e4",
+//     "roles": [],
+//     "sharks": [
+//       {
+//         "datacenter": "ruidc0",
+//         "manta_storage_id": "3.stor.east.joyent.us"
+//       },
+//       {
+//         "datacenter": "ruidc0",
+//         "manta_storage_id": "1.stor.east.joyent.us"
+//       }
+//     ],
+//     "type": "object",
+//     "vnode": 23352
+//   }
+// }
+
+
 #[macro_use]
 extern crate clap;
 
@@ -20,6 +59,7 @@ struct IdRet {
     max: String,
 }
 
+/// Find the largest _id/_idx in the database.
 fn find_largest_id_value(
     mclient: &mut MorayClient,
     id: &str,
@@ -64,6 +104,9 @@ fn _log_return_error(log: &Logger, msg: &str) -> Result<(), Error> {
     Err(Error::new(ErrorKind::Other, msg))
 }
 
+/// Pull the "_value" out of the moray object without using rust structures.
+/// This takes a moray bucket entry in the form of a serde Value and returns
+/// a manta object metadata entry in the form of a serde Value.
 pub fn manta_obj_from_moray_obj(moray_obj: &Value) -> Result<Value, String> {
     match moray_obj.get("_value") {
         Some(val) => {
@@ -93,6 +136,21 @@ pub fn manta_obj_from_moray_obj(moray_obj: &Value) -> Result<Value, String> {
 }
 
 // TODO: add tests for this function
+// See block comment at top of a file for an example of the object this is
+// working with.
+/// Called for every object that is read in by the query executed in
+/// read_chunk().  For a given object:
+///     1. Validate it is of the right form.
+///     2. Get it's "_value" which is the manta object metadata(*).
+///     3. Check if the manta object metadata is for an object that is on the
+///        shark that the caller is looking for.
+///     4. Return the entire moray entry as a serde Value
+///
+/// (*): The manta object metadata does not have a consistent schema, so the
+/// only thing we look for is the "sharks" array which should always be there
+/// regardless of the schema.  If it is not then we can't really filter on
+/// the shark so we log an error and move on, not returning the value to the
+/// caller.
 fn query_handler<F>(
     log: &Logger,
     val: &Value,
@@ -184,6 +242,8 @@ fn chunk_query(id_name: &str, begin: u64, end: u64, count: u64) -> String {
     )
 }
 
+/// Make the actual sql query and call the query_handler to handle processing
+/// every object that is returned in the chunk.
 fn read_chunk<F>(
     log: &Logger,
     mclient: &mut MorayClient,
@@ -206,6 +266,8 @@ where
     }
 }
 
+/// Find the maximum _id/_idx and, starting at 0 iterate over every entry up
+/// to the max.  For each chunk call read_chunk.
 fn iter_ids<F>(
     id_name: &str,
     moray_socket: &str,
@@ -313,6 +375,12 @@ fn validate_shark(shark: &str, log: Logger, domain: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Main entry point to for the sharkspotter library.  Callers need to
+/// provide a closure that takes a serde Value and a u32 shard number as its
+/// arguments.
+/// Sharkspotter works by first getting hte maximum and minimum _id and _idx
+/// for a given moray bucket (which is always "manta"), and then querying for
+/// entries in a user configurable chunk size.
 pub fn run<F>(
     mut conf: config::Config,
     log: Logger,
