@@ -17,7 +17,7 @@ fn write_mobj_to_file(file: &mut File, moray_obj: Value) -> Result<(), Error> {
         Ok(mo) => mo,
         Err(e) => {
             eprintln!("{}", e);
-            return Ok(())
+            return Ok(());
         }
     };
 
@@ -36,8 +36,10 @@ fn write_mobj_to_file(file: &mut File, moray_obj: Value) -> Result<(), Error> {
         Some(oid) => match serde_json::to_string(oid) {
             Ok(o) => o,
             Err(e) => {
-                eprintln!("Could not deserialize objectId {:#?}, {}",
-                    manta_obj, e);
+                eprintln!(
+                    "Could not deserialize objectId {:#?}, {}",
+                    manta_obj, e
+                );
                 return Ok(());
             }
         },

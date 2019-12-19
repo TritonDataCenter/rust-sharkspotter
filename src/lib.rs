@@ -71,22 +71,23 @@ pub fn manta_obj_from_moray_obj(moray_obj: &Value) -> Result<Value, String> {
             let str_val = match val_clone.as_str() {
                 Some(s) => s,
                 None => {
-                    return Err(format!("Could not format entry as string {:#?}",
-                        val));
+                    return Err(format!(
+                        "Could not format entry as string {:#?}",
+                        val
+                    ));
                 }
             };
 
             match serde_json::from_str(str_val) {
-                Ok(o) => o,
-                Err(e) => {
-                    return Err(format!("Could not format entry as object {:#?}",
-                        val));
-                }
+                Ok(o) => Ok(o),
+                Err(e) => Err(format!(
+                    "Could not format entry as object {:#?} ({})",
+                    val, e
+                )),
             }
-        },
+        }
         None => {
-            return Err(format!("Missing '_value' in Moray entry {:#?}",
-                moray_obj));
+            Err(format!("Missing '_value' in Moray entry {:#?}", moray_obj))
         }
     }
 }
