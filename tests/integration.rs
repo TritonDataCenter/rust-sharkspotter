@@ -27,6 +27,7 @@ OPTIONS:
     -e, --end <INDEX>                 index to stop scanning at (default: 0)
     -M, --max_shard <MAX_SHARD>       Ending shard number (default: 1)
     -m, --min_shard <MIN_SHARD>       Beginning shard number (default: 1)
+    -f, --file <FILE_NAME>            output filename (default shard_<num>_<shark>.objs
     -s, --shark <STORAGE_ID>          Find objects that belong to this shark";
 
         assert_cli::Assert::main_binary()
