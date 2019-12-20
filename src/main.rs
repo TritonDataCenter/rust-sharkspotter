@@ -9,7 +9,6 @@
 // This file can be parsed with the `json` tool which allows users to filter
 // on json object certain fields.
 
-
 use serde_json::Value;
 use sharkspotter::config::Config;
 use slog::{o, Drain, Logger};

@@ -38,7 +38,6 @@
 //   }
 // }
 
-
 #[macro_use]
 extern crate clap;
 
@@ -401,21 +400,37 @@ where
         conf.shark = new_shark;
     }
 
-    match validate_shark(&conf.shark, log.clone(), &conf.domain) {
-        Ok(()) => (),
-        Err(e) => {
-            error!(log, "{}", e);
-            return Err(e);
+    if !conf.skip_validate_shark {
+        match validate_shark(&conf.shark, log.clone(), &conf.domain) {
+            Ok(()) => (),
+            Err(e) => {
+                error!(log, "{}", e);
+                return Err(e);
+            }
         }
     }
 
     for i in conf.min_shard..=conf.max_shard {
         let moray_host = format!("{}.moray.{}", i, conf.domain);
-        let moray_ip = lookup_ip_str(moray_host.as_str())?;
+        let moray_ip = match lookup_ip_str(moray_host.as_str()) {
+            Ok(ip) => ip,
+            Err(e) => {
+                error!(
+                    &log,
+                    "Error looking up moray host, skipping shard. {:#?}", e
+                );
+                continue;
+            }
+        };
         let moray_socket = format!("{}:{}", moray_ip, 2021);
 
-        iter_ids("_id", &moray_socket, &conf, log.clone(), i, &mut handler)?;
-        iter_ids("_idx", &moray_socket, &conf, log.clone(), i, &mut handler)?;
+        for id in ["_id", "_idx"].iter() {
+            if let Err(e) =
+                iter_ids(id, &moray_socket, &conf, log.clone(), i, &mut handler)
+            {
+                error!(&log, "Encountered error scanning shard {} ({})", i, e);
+            }
+        }
     }
 
     Ok(())

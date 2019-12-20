@@ -12,6 +12,7 @@ pub struct Config {
     pub chunk_size: u64,
     pub begin: u64,
     pub end: u64,
+    pub skip_validate_shark: bool,
     pub output_file: Option<String>,
 }
 
@@ -25,6 +26,7 @@ impl Default for Config {
             begin: 0,
             end: 0,
             chunk_size: 100,
+            skip_validate_shark: false,
             output_file: None,
         }
     }
@@ -34,8 +36,9 @@ impl Config {
     // TODO:
     // Allow the option of selecting which data to keep
     pub fn from_args(_args: std::env::Args) -> Result<Config, Error> {
+        let version = env!("CARGO_PKG_VERSION");
         let matches = App::new("sharkspotter")
-            .version("0.1.0")
+            .version(version)
             .about("A tool for finding all of the Manta objects that reside on a given shark \
             (storage zone).")
             .setting(AppSettings::ArgRequiredElseHelp)
@@ -90,6 +93,11 @@ impl Config {
                 .value_name("FILE_NAME")
                 .help("output filename (default shard_<num>_<shark>.objs")
                 .takes_value(true))
+            .arg(Arg::with_name("skip_validate_shark")
+                .short("x")
+                .help("Skip shark validation. Useful if shark is in readonly \
+                mode.")
+                .takes_value(false))
             .get_matches();
 
         let mut config = Config::default();
@@ -116,6 +124,10 @@ impl Config {
 
         if let Ok(output_file) = value_t!(matches, "output_file", String) {
             config.output_file = Some(output_file);
+        }
+
+        if matches.is_present("x") {
+            config.skip_validate_shark = true;
         }
 
         config.domain = matches.value_of("domain").unwrap().to_string();
