@@ -424,7 +424,7 @@ where
         };
         let moray_socket = format!("{}:{}", moray_ip, 2021);
 
-        for id in ["id", "_idx"].iter() {
+        for id in ["_id", "_idx"].iter() {
             if let Err(e) =
                 iter_ids(id, &moray_socket, &conf, log.clone(), i, &mut handler)
             {
