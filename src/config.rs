@@ -36,8 +36,9 @@ impl Config {
     // TODO:
     // Allow the option of selecting which data to keep
     pub fn from_args(_args: std::env::Args) -> Result<Config, Error> {
+        let version = env!("CARGO_PKG_VERSION");
         let matches = App::new("sharkspotter")
-            .version("0.1.0")
+            .version(version)
             .about("A tool for finding all of the Manta objects that reside on a given shark \
             (storage zone).")
             .setting(AppSettings::ArgRequiredElseHelp)
@@ -95,7 +96,7 @@ impl Config {
             .arg(Arg::with_name("skip_validate_shark")
                 .short("x")
                 .help("Skip shark validation. Useful if shark is in readonly \
-                mode")
+                mode.")
                 .takes_value(false))
             .get_matches();
 

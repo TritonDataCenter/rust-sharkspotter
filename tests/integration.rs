@@ -10,6 +10,28 @@ mod integration {
 
     #[test]
     fn missing_all_args() {
+        let error_string = format!("sharkspotter {}
+A tool for finding all of the Manta objects that reside on a given shark (storage zone).
+
+USAGE:
+    sharkspotter [FLAGS] [OPTIONS] --domain <MORAY_DOMAIN> --shark <STORAGE_ID>
+
+FLAGS:
+    -h, --help       Prints help information
+    -x               Skip shark validation. Useful if shark is in readonly mode.
+    -V, --version    Prints version information
+
+OPTIONS:
+    -b, --begin <INDEX>               index to being scanning at (default: 0)
+    -c, --chunk-size <NUM_RECORDS>    number of records to scan per call to moray (default: 100)
+    -d, --domain <MORAY_DOMAIN>       Domain that the moray zones are in
+    -e, --end <INDEX>                 index to stop scanning at (default: 0)
+    -M, --max_shard <MAX_SHARD>       Ending shard number (default: 1)
+    -m, --min_shard <MIN_SHARD>       Beginning shard number (default: 1)
+    -f, --file <FILE_NAME>            output filename (default shard_<num>_<shark>.objs
+    -s, --shark <STORAGE_ID>          Find objects that belong to this shark
+", env!("CARGO_PKG_VERSION"));
+        /*
         const ERROR_STRING: &str = "sharkspotter 0.1.0
 A tool for finding all of the Manta objects that reside on a given shark (storage zone).
 
@@ -29,12 +51,13 @@ OPTIONS:
     -m, --min_shard <MIN_SHARD>       Beginning shard number (default: 1)
     -f, --file <FILE_NAME>            output filename (default shard_<num>_<shark>.objs
     -s, --shark <STORAGE_ID>          Find objects that belong to this shark";
+    */
 
         assert_cli::Assert::main_binary()
             .fails()
             .and()
             .stderr()
-            .contains(ERROR_STRING)
+            .contains(error_string.as_str())
             .unwrap();
     }
 
