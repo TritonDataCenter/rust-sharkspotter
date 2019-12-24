@@ -11,7 +11,8 @@
 
 use serde_json::Value;
 use sharkspotter::config::Config;
-use slog::{o, Drain, Logger};
+use sharkspotter::util;
+use slog::Logger;
 use std::collections::HashMap;
 use std::env;
 use std::fs::{File, OpenOptions};
@@ -19,7 +20,6 @@ use std::io::prelude::*;
 use std::io::Error;
 use std::path::Path;
 use std::process;
-use std::sync::Mutex;
 
 fn write_mobj_to_file(file: &mut File, moray_obj: Value) -> Result<(), Error> {
     let manta_obj = match sharkspotter::manta_obj_from_moray_obj(&moray_obj) {
@@ -107,13 +107,9 @@ fn main() -> Result<(), Error> {
         process::exit(1);
     });
 
-    let plain = slog_term::PlainSyncDecorator::new(std::io::stdout());
-    let log = Logger::root(
-        Mutex::new(slog_term::FullFormat::new(plain).build()).fuse(),
-        o!("build-id" => "0.1.0"),
-    );
-
+    let log = util::init_plain_logger();
     let filename = conf.output_file.clone();
+
     match filename {
         Some(fname) => run_with_user_file(fname, conf, log),
         None => run_with_file_map(conf, log),

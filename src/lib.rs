@@ -42,6 +42,7 @@
 extern crate clap;
 
 pub mod config;
+pub mod util;
 
 use libmanta::moray::MantaObjectShark;
 use moray::client::MorayClient;
@@ -58,40 +59,93 @@ struct IdRet {
     max: String,
 }
 
+fn _parse_max_id_value(val: Value, log: &Logger) -> Result<u64, Error> {
+    if val.is_array() {
+        let val_arr = val.as_array().unwrap();
+
+        if val_arr.len() != 1 {
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!("Expected single element got {}", val_arr.len()),
+            ));
+        }
+    } else {
+        return Err(Error::new(ErrorKind::Other, "Expected array"));
+    }
+
+    let max = match val[0].get("max") {
+        Some(m) => m.to_owned(),
+        None => {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "Query missing 'max' value",
+            ));
+        }
+    };
+
+    let max_num: u64 = match max {
+        Value::Number(n) => {
+            debug!(log, "Parsing largest id value as Number");
+            match n.as_u64() {
+                Some(num_64) => num_64,
+                None => {
+                    return Err(Error::new(
+                        ErrorKind::Other,
+                        "Error converting number to u64",
+                    ));
+                }
+            }
+        }
+        Value::String(s) => {
+            debug!(log, "Parsing largest id value as String");
+            match s.parse() {
+                Ok(snum) => snum,
+                Err(e) => {
+                    let msg =
+                        format!("Error parsing max value as String: {}", e);
+                    return Err(Error::new(ErrorKind::Other, msg));
+                }
+            }
+        }
+        _ => {
+            debug!(log, "largest id value is unknown variant {:#?}", max);
+            return Err(Error::new(
+                ErrorKind::Other,
+                "Error max value was not a string or a number",
+            ));
+        }
+    };
+
+    Ok(max_num)
+}
+
 /// Find the largest _id/_idx in the database.
 fn find_largest_id_value(
+    log: &Logger,
     mclient: &mut MorayClient,
     id: &str,
 ) -> Result<u64, Error> {
     let mut ret: u64 = 0;
+    debug!(log, "Finding largest ID value as '{}'", id);
     mclient.sql(
         format!("SELECT MAX({}) FROM manta;", id).as_str(),
         vec![],
         r#"{"limit": 1, "no_count": true}"#,
         |resp| {
-            if resp.is_array() {
-                let resp_arr = resp.as_array().unwrap();
+            // The expected response is:
+            //  [{
+            //      "max": <value>
+            //  }]
+            //
+            //  Where <value> is either a String or a Number.
 
-                if resp_arr.len() != 1 {
-                    return Err(Error::new(
-                        ErrorKind::Other,
-                        format!(
-                            "Expected single element got {}",
-                            resp_arr.len()
-                        ),
-                    ));
+            ret = match _parse_max_id_value(resp.to_owned(), log) {
+                Ok(max_num) => max_num,
+                Err(e) => {
+                    return Err(e);
                 }
-            } else {
-                return Err(Error::new(ErrorKind::Other, "Expected array"));
-            }
-
-            serde_json::from_value::<IdRet>(resp[0].clone()).and_then(
-                |max_obj: IdRet| {
-                    let max: u64 = max_obj.max.parse().unwrap();
-                    ret = max;
-                    Ok(())
-                },
-            )?;
+            };
+            //            ret = max_num;
             Ok(())
         },
     )?;
@@ -282,7 +336,7 @@ where
 
     let mut start_id = conf.begin;
     let mut end_id = conf.begin + conf.chunk_size - 1;
-    let largest_id = match find_largest_id_value(&mut mclient, id_name) {
+    let largest_id = match find_largest_id_value(&log, &mut mclient, id_name) {
         Ok(id) => id,
         Err(e) => {
             error!(&log, "Error finding largest ID: {}, using 0", e);
@@ -324,7 +378,8 @@ where
 
         debug!(
             &log,
-            "start_id: {} | end_id: {} | remaining: {}",
+            "shard: {} | start_id: {} | end_id: {} | remaining: {}",
+            shard_num,
             start_id,
             end_id,
             remaining
@@ -434,4 +489,47 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use util;
+
+    #[test]
+    fn _parse_max_id_value_test() {
+        let log = util::init_plain_logger();
+
+        // not an array
+        let num_value_no_arr = json!({
+            "max": 12341234, // You, you try.  You try to get by.
+        });
+        assert!(_parse_max_id_value(num_value_no_arr, &log).is_err());
+
+        // bad variant "bool"
+        let num_value_bad_variant = json!([{
+            "max": false, // You're never gonna pull it off you shouldn't
+                          // even try.
+        }]);
+        assert!(_parse_max_id_value(num_value_bad_variant, &log).is_err());
+
+        // not a string number
+        let num_value_bad_string = json!([{
+            "max": "Every single second is a moment in time.",
+        }]);
+        assert!(_parse_max_id_value(num_value_bad_string, &log).is_err());
+
+        // parse-able string
+        let num_value_string = json!([{
+            "max": "12341234",
+        }]);
+        assert!(_parse_max_id_value(num_value_string, &log).is_ok());
+
+        // number
+        let num_value_num = json!([{
+            "max": 12341234,
+        }]);
+        assert!(_parse_max_id_value(num_value_num, &log).is_ok());
+    }
 }
