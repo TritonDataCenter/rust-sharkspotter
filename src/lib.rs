@@ -145,7 +145,6 @@ fn find_largest_id_value(
                     return Err(e);
                 }
             };
-            //            ret = max_num;
             Ok(())
         },
     )?;
