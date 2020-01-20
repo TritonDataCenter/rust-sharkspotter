@@ -1,6 +1,6 @@
 [package]
 name = "sharkspotter"
-version = "0.10.1"
+version = "0.10.2"
 authors = ["Rui Loura <rui@joyent.com>", "Jon Anderson <jon.anderson@joyent.com>"]
 edition = "2018"
 
@@ -10,7 +10,8 @@ serde = { version = "1.0.89", features = ["derive"] }
 serde_json = "1.0.39"
 clap = "2.33.0"
 libmanta = { git = "https://github.com/joyent/rust-libmanta", tag = "v0.7.0" }
-moray = { git = "https://github.com/joyent/rust-moray", tag="v0.9.1" }
+#moray = { git = "https://github.com/joyent/rust-moray", tag="v0.9.1" }
+moray = { git = "https://github.com/joyent/rust-moray", branch="MANTA-4889_new_cueball" }
 slog = { version = "2.5.2" }
 slog-bunyan = { git = "https://github.com/kellymclaughlin/bunyan", branch = "build-on-smartos" }
 trust-dns-resolver = "0.11.1"
