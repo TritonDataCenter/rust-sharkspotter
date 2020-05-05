@@ -15,7 +15,7 @@ use sharkspotter::util;
 use slog::Logger;
 use std::collections::HashMap;
 use std::env;
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::prelude::*;
 use std::io::Error;
 use std::path::Path;
@@ -57,12 +57,16 @@ fn write_mobj_to_file(file: &mut File, moray_obj: Value) -> Result<(), Error> {
 }
 
 fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
+    let domain_prefix = format!(".{}", conf.domain);
     let mut file_map = HashMap::new();
     let filename = |shark: &str,  shard| {
         format!("{}/shard_{}.objs", shark, shard)
     };
 
     for shark in conf.sharks.iter() {
+        let dirname = format!("./{}", shark);
+        fs::create_dir(dirname.as_str())?;
+
         for shard in conf.min_shard..=conf.max_shard {
             let fname = filename(shark, shard);
             let path = Path::new(fname.as_str());
@@ -84,7 +88,10 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
     }
 
     sharkspotter::run(conf, log, |moray_obj, shark, shard| {
-        let file = file_map.get_mut(&filename(shark, shard)).unwrap();
+        let shark = shark.replace(domain_prefix.clone().as_str(), "");
+        println!("shark: {}, shard: {}", shark, shard);
+
+        let file = file_map.get_mut(&filename(shark.as_str(), shard)).unwrap();
 
         write_mobj_to_file(file, moray_obj)
     })

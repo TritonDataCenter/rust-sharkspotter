@@ -415,12 +415,12 @@ fn validate_sharks(sharks: &Vec<String>, log: Logger, domain: &str)
     let shard1_moray = format!("1.moray.{}", domain);
     let moray_ip = lookup_ip_str(shard1_moray.as_str())?;
     let moray_socket = format!("{}:{}", moray_ip, 2021);
+    let opts = moray_objects::MethodOptions::default();
     let mut mclient =
         MorayClient::from_str(moray_socket.as_str(), log.clone(), None)?;
 
-    let opts = moray_objects::MethodOptions::default();
-    let mut count = 0;
     for shark in sharks.iter() {
+        let mut count = 0;
         let filter = format!("manta_storage_id={}", shark);
         mclient.find_objects("manta_storage", filter.as_str(), &opts, |_| {
             count += 1;
