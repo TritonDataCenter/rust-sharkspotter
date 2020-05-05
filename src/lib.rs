@@ -288,14 +288,6 @@ where
                 shard_num)
         })?;
 
-    /*
-    if !sharks.iter().any(|s| s.manta_storage_id == shark) {
-        return Ok(());
-    }
-
-    handler(moray_object, shard_num)?;
-    */
-
     Ok(())
 }
 
