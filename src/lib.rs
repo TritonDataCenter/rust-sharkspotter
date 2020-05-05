@@ -207,11 +207,11 @@ fn query_handler<F>(
     log: &Logger,
     val: &Value,
     shard_num: u32,
-    shark: &str,
+    sharks_requested: &Vec<String>,
     handler: &mut F,
 ) -> Result<(), Error>
 where
-    F: FnMut(Value, u32) -> Result<(), Error>,
+    F: FnMut(Value, &str, u32) -> Result<(), Error>,
 {
     match val.as_array() {
         Some(v) => {
@@ -235,7 +235,9 @@ where
         }
     };
 
-    let moray_object = match serde_json::from_value(moray_value.clone()) {
+    let moray_object: Value = match serde_json::from_value(
+        moray_value.clone())
+    {
         Ok(mo) => mo,
         Err(e) => {
             let msg = format!(
@@ -277,11 +279,22 @@ where
     };
 
     // Filter on shark
+    sharks.iter()
+        .filter(|s| sharks_requested.contains(&s.manta_storage_id))
+        .try_for_each(|s| {
+            handler(
+                moray_object.clone(),
+                s.manta_storage_id.as_str(),
+                shard_num)
+        })?;
+
+    /*
     if !sharks.iter().any(|s| s.manta_storage_id == shark) {
         return Ok(());
     }
 
     handler(moray_object, shard_num)?;
+    */
 
     Ok(())
 }
@@ -301,14 +314,14 @@ fn read_chunk<F>(
     mclient: &mut MorayClient,
     query: &str,
     shard_num: u32,
-    shark: &str,
+    sharks: &Vec<String>,
     handler: &mut F,
 ) -> Result<(), Error>
 where
-    F: FnMut(Value, u32) -> Result<(), Error>,
+    F: FnMut(Value, &str, u32) -> Result<(), Error>,
 {
     match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
-        query_handler(log, a, shard_num, shark, handler)
+        query_handler(log, a, shard_num, sharks, handler)
     }) {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -329,7 +342,7 @@ fn iter_ids<F>(
     mut handler: F,
 ) -> Result<(), Error>
 where
-    F: FnMut(Value, u32) -> Result<(), Error>,
+    F: FnMut(Value, &str, u32) -> Result<(), Error>,
 {
     let mut mclient = MorayClient::from_str(moray_socket, log.clone(), None)?;
 
@@ -356,7 +369,7 @@ where
             &mut mclient,
             query.as_str(),
             shard_num,
-            &conf.shark,
+            &conf.sharks,
             &mut handler,
         ) {
             Ok(()) => (),
@@ -396,33 +409,37 @@ fn lookup_ip_str(host: &str) -> Result<String, Error> {
     Ok(ip[0].to_string())
 }
 
-fn validate_shark(shark: &str, log: Logger, domain: &str) -> Result<(), Error> {
+fn validate_sharks(sharks: &Vec<String>, log: Logger, domain: &str)
+    -> Result<(), Error>
+{
     let shard1_moray = format!("1.moray.{}", domain);
     let moray_ip = lookup_ip_str(shard1_moray.as_str())?;
     let moray_socket = format!("{}:{}", moray_ip, 2021);
     let mut mclient =
         MorayClient::from_str(moray_socket.as_str(), log.clone(), None)?;
 
-    let filter = format!("manta_storage_id={}", shark);
     let opts = moray_objects::MethodOptions::default();
     let mut count = 0;
-    mclient.find_objects("manta_storage", filter.as_str(), &opts, |_| {
-        count += 1;
-        Ok(())
-    })?;
+    for shark in sharks.iter() {
+        let filter = format!("manta_storage_id={}", shark);
+        mclient.find_objects("manta_storage", filter.as_str(), &opts, |_| {
+            count += 1;
+            Ok(())
+        })?;
 
-    if count > 1 {
-        return Err(Error::new(
-            ErrorKind::Other,
-            format!("More than one shark with name \"{}\" found", shark),
-        ));
-    }
+        if count > 1 {
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!("More than one shark with name \"{}\" found", shark),
+            ));
+        }
 
-    if count == 0 {
-        return Err(Error::new(
-            ErrorKind::Other,
-            format!("No shark with name \"{}\" found", shark),
-        ));
+        if count == 0 {
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!("No shark with name \"{}\" found", shark),
+            ));
+        }
     }
 
     Ok(())
@@ -440,22 +457,28 @@ pub fn run<F>(
     mut handler: F,
 ) -> Result<(), Error>
 where
-    F: FnMut(Value, u32) -> Result<(), Error>,
+    F: FnMut(Value, &str, u32) -> Result<(), Error>,
 {
-    if !conf.shark.contains(conf.domain.as_str()) {
-        let new_shark = format!("{}.{}", conf.shark, conf.domain);
-        warn!(log,
-            "Domain \"{}\" not found in storage node string:\"{}\", using \"{}\"",
-            conf.domain,
-            conf.shark,
-            new_shark
+    let mut new_sharks = vec![];
+    for shark in conf.sharks.iter() {
+        if !shark.contains(conf.domain.as_str()) {
+            let new_shark = format!("{}.{}", shark, conf.domain);
+            warn!(log,
+                  "Domain \"{}\" not found in storage node string:\"{}\", using \"{}\"",
+                  conf.domain,
+                  shark,
+                  new_shark
             );
 
-        conf.shark = new_shark;
+            new_sharks.push(new_shark);
+        } else {
+            new_sharks.push(shark.to_owned());
+        }
     }
+    conf.sharks = new_sharks;
 
-    if !conf.skip_validate_shark {
-        match validate_shark(&conf.shark, log.clone(), &conf.domain) {
+    if !conf.skip_validate_sharks {
+        match validate_sharks(&conf.sharks, log.clone(), &conf.domain) {
             Ok(()) => (),
             Err(e) => {
                 error!(log, "{}", e);
