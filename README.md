@@ -12,10 +12,11 @@ cd target/<debug | release>/
 ## Usage
 ```
 USAGE:
-    sharkspotter [OPTIONS] --domain <MORAY_DOMAIN> --shark <STORAGE_ID>
+    sharkspotter [FLAGS] [OPTIONS] --domain <MORAY_DOMAIN> --shark <STORAGE_ID>...
 
 FLAGS:
     -h, --help       Prints help information
+    -x               Skip shark validation. Useful if shark is in readonly mode.
     -V, --version    Prints version information
 
 OPTIONS:
@@ -25,13 +26,21 @@ OPTIONS:
     -e, --end <INDEX>                 index to stop scanning at (default: 0)
     -M, --max_shard <MAX_SHARD>       Ending shard number (default: 1)
     -m, --min_shard <MIN_SHARD>       Beginning shard number (default: 1)
-    -s, --shark <STORAGE_ID>          Find objects that belong to this shark
+    -f, --file <FILE_NAME>            output filename (default <shark>/shard_<shard_num>.objs
+    -s, --shark <STORAGE_ID>...       Find objects that belong to this shark
 ```
 
 ## Example
 ```
 $ cargo run -- --domain east.joyent.us --shark 1.stor -M 1 -m 1
-$ json -f shard_1_1.stor.objs -g
+$ json -f ./1.stor/shard_1.objs
+```
+
+You can also specify multiple sharks like so:
+```
+$ cargo run -- --domain east.joyent.us --shark 1.stor --shark 2.stor -M 1 -m 1
+$ json -f ./1.stor/shard_1.objs
+$ json -f ./2.stor/shard_1.objs
 ```
 
 __This can be a big file so [json](https://github.com/trentm/json) may struggle with it__

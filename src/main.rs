@@ -59,9 +59,8 @@ fn write_mobj_to_file(file: &mut File, moray_obj: Value) -> Result<(), Error> {
 fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
     let domain_prefix = format!(".{}", conf.domain);
     let mut file_map = HashMap::new();
-    let filename = |shark: &str,  shard| {
-        format!("{}/shard_{}.objs", shark, shard)
-    };
+    let filename =
+        |shark: &str, shard| format!("{}/shard_{}.objs", shark, shard);
 
     for shark in conf.sharks.iter() {
         let dirname = format!("./{}", shark);

@@ -207,7 +207,7 @@ fn query_handler<F>(
     log: &Logger,
     val: &Value,
     shard_num: u32,
-    sharks_requested: &Vec<String>,
+    sharks_requested: &[String],
     handler: &mut F,
 ) -> Result<(), Error>
 where
@@ -235,8 +235,7 @@ where
         }
     };
 
-    let moray_object: Value = match serde_json::from_value(
-        moray_value.clone())
+    let moray_object: Value = match serde_json::from_value(moray_value.clone())
     {
         Ok(mo) => mo,
         Err(e) => {
@@ -279,13 +278,15 @@ where
     };
 
     // Filter on shark
-    sharks.iter()
+    sharks
+        .iter()
         .filter(|s| sharks_requested.contains(&s.manta_storage_id))
         .try_for_each(|s| {
             handler(
                 moray_object.clone(),
                 s.manta_storage_id.as_str(),
-                shard_num)
+                shard_num,
+            )
         })?;
 
     Ok(())
@@ -306,7 +307,7 @@ fn read_chunk<F>(
     mclient: &mut MorayClient,
     query: &str,
     shard_num: u32,
-    sharks: &Vec<String>,
+    sharks: &[String],
     handler: &mut F,
 ) -> Result<(), Error>
 where
@@ -401,9 +402,11 @@ fn lookup_ip_str(host: &str) -> Result<String, Error> {
     Ok(ip[0].to_string())
 }
 
-fn validate_sharks(sharks: &Vec<String>, log: Logger, domain: &str)
-    -> Result<(), Error>
-{
+fn validate_sharks(
+    sharks: &[String],
+    log: Logger,
+    domain: &str,
+) -> Result<(), Error> {
     let shard1_moray = format!("1.moray.{}", domain);
     let moray_ip = lookup_ip_str(shard1_moray.as_str())?;
     let moray_socket = format!("{}:{}", moray_ip, 2021);
@@ -414,10 +417,15 @@ fn validate_sharks(sharks: &Vec<String>, log: Logger, domain: &str)
     for shark in sharks.iter() {
         let mut count = 0;
         let filter = format!("manta_storage_id={}", shark);
-        mclient.find_objects("manta_storage", filter.as_str(), &opts, |_| {
-            count += 1;
-            Ok(())
-        })?;
+        mclient.find_objects(
+            "manta_storage",
+            filter.as_str(),
+            &opts,
+            |_| {
+                count += 1;
+                Ok(())
+            },
+        )?;
 
         if count > 1 {
             return Err(Error::new(
