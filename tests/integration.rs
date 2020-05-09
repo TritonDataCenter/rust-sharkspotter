@@ -11,10 +11,10 @@ mod integration {
     #[test]
     fn missing_all_args() {
         let error_string = format!("sharkspotter {}
-A tool for finding all of the Manta objects that reside on a given shark (storage zone).
+A tool for finding all of the Manta objects that reside on a given set of sharks (storage zones).
 
 USAGE:
-    sharkspotter [FLAGS] [OPTIONS] --domain <MORAY_DOMAIN> --shark <STORAGE_ID>
+    sharkspotter [FLAGS] [OPTIONS] --domain <MORAY_DOMAIN> --shark <STORAGE_ID>...
 
 FLAGS:
     -h, --help       Prints help information
@@ -28,8 +28,8 @@ OPTIONS:
     -e, --end <INDEX>                 index to stop scanning at (default: 0)
     -M, --max_shard <MAX_SHARD>       Ending shard number (default: 1)
     -m, --min_shard <MIN_SHARD>       Beginning shard number (default: 1)
-    -f, --file <FILE_NAME>            output filename (default shard_<num>_<shark>.objs
-    -s, --shark <STORAGE_ID>          Find objects that belong to this shark
+    -f, --file <FILE_NAME>            output filename (default <shark>/shard_<shard_num>.objs
+    -s, --shark <STORAGE_ID>...       Find objects that belong to this shark
 ", env!("CARGO_PKG_VERSION"));
 
         assert_cli::Assert::main_binary()

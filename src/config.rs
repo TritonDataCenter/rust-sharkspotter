@@ -8,11 +8,11 @@ pub struct Config {
     pub min_shard: u32,
     pub max_shard: u32,
     pub domain: String,
-    pub shark: String,
+    pub sharks: Vec<String>,
     pub chunk_size: u64,
     pub begin: u64,
     pub end: u64,
-    pub skip_validate_shark: bool,
+    pub skip_validate_sharks: bool,
     pub output_file: Option<String>,
 }
 
@@ -22,11 +22,11 @@ impl Default for Config {
             min_shard: 1,
             max_shard: 1,
             domain: String::from(""),
-            shark: String::from(""),
+            sharks: vec![String::from("")],
             begin: 0,
             end: 0,
             chunk_size: 100,
-            skip_validate_shark: false,
+            skip_validate_sharks: false,
             output_file: None,
         }
     }
@@ -39,8 +39,8 @@ impl Config {
         let version = env!("CARGO_PKG_VERSION");
         let matches = App::new("sharkspotter")
             .version(version)
-            .about("A tool for finding all of the Manta objects that reside on a given shark \
-            (storage zone).")
+            .about("A tool for finding all of the Manta objects that reside \
+            on a given set of sharks (storage zones).")
             .setting(AppSettings::ArgRequiredElseHelp)
             .arg(Arg::with_name("min_shard")
                 .short("m")
@@ -67,6 +67,8 @@ impl Config {
                 .value_name("STORAGE_ID")
                 .help("Find objects that belong to this shark")
                 .required(true)
+                .number_of_values(1) // only 1 value per occurrence
+                .multiple(true) // allow multiple occurrences
                 .takes_value(true))
             .arg(Arg::with_name("chunk-size")
                 .short("c")
@@ -91,9 +93,9 @@ impl Config {
                 .short("f")
                 .long("file")
                 .value_name("FILE_NAME")
-                .help("output filename (default shard_<num>_<shark>.objs")
+                .help("output filename (default <shark>/shard_<shard_num>.objs")
                 .takes_value(true))
-            .arg(Arg::with_name("skip_validate_shark")
+            .arg(Arg::with_name("skip_validate_sharks")
                 .short("x")
                 .help("Skip shark validation. Useful if shark is in readonly \
                 mode.")
@@ -127,11 +129,15 @@ impl Config {
         }
 
         if matches.is_present("x") {
-            config.skip_validate_shark = true;
+            config.skip_validate_sharks = true;
         }
 
         config.domain = matches.value_of("domain").unwrap().to_string();
-        config.shark = matches.value_of("shark").unwrap().to_string();
+        config.sharks = matches
+            .values_of("shark")
+            .unwrap()
+            .map(String::from)
+            .collect();
 
         Ok(config)
     }

@@ -15,7 +15,7 @@ use sharkspotter::util;
 use slog::Logger;
 use std::collections::HashMap;
 use std::env;
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::prelude::*;
 use std::io::Error;
 use std::path::Path;
@@ -57,26 +57,40 @@ fn write_mobj_to_file(file: &mut File, moray_obj: Value) -> Result<(), Error> {
 }
 
 fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
+    let domain_prefix = format!(".{}", conf.domain);
     let mut file_map = HashMap::new();
+    let filename =
+        |shark: &str, shard| format!("{}/shard_{}.objs", shark, shard);
 
-    for i in conf.min_shard..=conf.max_shard {
-        let filename = format!("shard_{}_{}.objs", i, conf.shark);
-        let path = Path::new(filename.as_str());
-        let file = match OpenOptions::new().append(true).create(true).open(path)
-        {
-            Err(e) => panic!(
-                "Couldn't create output file '{}': {}",
-                path.display(),
-                e
-            ),
-            Ok(file) => file,
-        };
+    for shark in conf.sharks.iter() {
+        let dirname = format!("./{}", shark);
+        fs::create_dir(dirname.as_str())?;
 
-        file_map.insert(i, file);
+        for shard in conf.min_shard..=conf.max_shard {
+            let fname = filename(shark, shard);
+            let path = Path::new(fname.as_str());
+            let file = match OpenOptions::new()
+                .append(true)
+                .create_new(true)
+                .open(path)
+            {
+                Err(e) => panic!(
+                    "Couldn't create output file '{}': {}",
+                    path.display(),
+                    e
+                ),
+                Ok(file) => file,
+            };
+
+            file_map.insert(fname, file);
+        }
     }
 
-    sharkspotter::run(conf, log, |moray_obj, shard| {
-        let file = file_map.get_mut(&shard).unwrap();
+    sharkspotter::run(conf, log, |moray_obj, shark, shard| {
+        let shark = shark.replace(domain_prefix.clone().as_str(), "");
+        println!("shark: {}, shard: {}", shark, shard);
+
+        let file = file_map.get_mut(&filename(shark.as_str(), shard)).unwrap();
 
         write_mobj_to_file(file, moray_obj)
     })
@@ -96,7 +110,7 @@ fn run_with_user_file(
         Ok(file) => file,
     };
 
-    sharkspotter::run(conf, log, |moray_obj, _| {
+    sharkspotter::run(conf, log, |moray_obj, _shark, _shard| {
         write_mobj_to_file(&mut file, moray_obj)
     })
 }
