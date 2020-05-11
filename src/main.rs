@@ -21,36 +21,27 @@ use std::io::Error;
 use std::path::Path;
 use std::process;
 
-fn write_mobj_to_file(file: &mut File, moray_obj: Value) -> Result<(), Error> {
-    let manta_obj = match sharkspotter::manta_obj_from_moray_obj(&moray_obj) {
-        Ok(mo) => mo,
-        Err(e) => {
-            eprintln!("{}", e);
-            return Ok(());
-        }
-    };
+fn write_mobj_to_file(
+    file: &mut File,
+    moray_obj: Value,
+    full_object: bool,
+) -> Result<(), Error> {
+    let out_obj: Value;
 
-    let object_id = match manta_obj.get("objectId") {
-        Some(oid) => match serde_json::to_string(oid) {
-            Ok(o) => o,
+    if !full_object {
+        out_obj = match sharkspotter::manta_obj_from_moray_obj(&moray_obj) {
+            Ok(mo) => mo,
             Err(e) => {
-                eprintln!(
-                    "Could not deserialize objectId {:#?}, {}",
-                    manta_obj, e
-                );
+                eprintln!("{}", e);
                 return Ok(());
             }
-        },
-        None => {
-            eprintln!("Could not get objectId from value {:#?}", manta_obj);
-            return Ok(());
         }
-    };
+    } else {
+        out_obj = moray_obj;
+    }
 
-    println!("{}", object_id);
-
-    let buf = serde_json::to_string(&manta_obj)?;
-    file.write_all(buf.as_bytes())?; // TODO: match
+    let buf = serde_json::to_string(&out_obj)?;
+    file.write_all(buf.as_bytes())?;
     file.write_all(b"\n")?;
 
     Ok(())
@@ -58,6 +49,7 @@ fn write_mobj_to_file(file: &mut File, moray_obj: Value) -> Result<(), Error> {
 
 fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
     let domain_prefix = format!(".{}", conf.domain);
+    let full_object = conf.full_moray_obj;
     let mut file_map = HashMap::new();
     let filename =
         |shark: &str, shard| format!("{}/shard_{}.objs", shark, shard);
@@ -92,7 +84,7 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
 
         let file = file_map.get_mut(&filename(shark.as_str(), shard)).unwrap();
 
-        write_mobj_to_file(file, moray_obj)
+        write_mobj_to_file(file, moray_obj, full_object)
     })
 }
 
@@ -102,6 +94,7 @@ fn run_with_user_file(
     log: Logger,
 ) -> Result<(), Error> {
     let path = Path::new(filename.as_str());
+    let full_object = conf.full_moray_obj;
     let mut file = match OpenOptions::new().append(true).create(true).open(path)
     {
         Err(e) => {
@@ -111,7 +104,7 @@ fn run_with_user_file(
     };
 
     sharkspotter::run(conf, log, |moray_obj, _shark, _shard| {
-        write_mobj_to_file(&mut file, moray_obj)
+        write_mobj_to_file(&mut file, moray_obj, full_object)
     })
 }
 
