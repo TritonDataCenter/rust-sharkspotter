@@ -14,6 +14,7 @@ pub struct Config {
     pub end: u64,
     pub skip_validate_sharks: bool,
     pub output_file: Option<String>,
+    pub full_moray_obj: bool,
 }
 
 impl Default for Config {
@@ -28,6 +29,7 @@ impl Default for Config {
             chunk_size: 100,
             skip_validate_sharks: false,
             output_file: None,
+            full_moray_obj: false,
         }
     }
 }
@@ -100,6 +102,12 @@ impl Config {
                 .help("Skip shark validation. Useful if shark is in readonly \
                 mode.")
                 .takes_value(false))
+            .arg(Arg::with_name("full_moray_object")
+                .short("F")
+                .long("full_object")
+                .help("Write full moray objects to file instead of just the \
+                manta objects.")
+                .takes_value(false))
             .get_matches();
 
         let mut config = Config::default();
@@ -130,6 +138,10 @@ impl Config {
 
         if matches.is_present("x") {
             config.skip_validate_sharks = true;
+        }
+
+        if matches.is_present("full_moray_object") {
+            config.full_moray_obj = true;
         }
 
         config.domain = matches.value_of("domain").unwrap().to_string();
