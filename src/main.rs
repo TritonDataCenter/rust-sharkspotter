@@ -14,7 +14,6 @@ use sharkspotter::config::Config;
 use sharkspotter::util;
 use slog::Logger;
 use std::collections::HashMap;
-use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::prelude::*;
 use std::io::Error;
@@ -109,7 +108,7 @@ fn run_with_user_file(
 }
 
 fn main() -> Result<(), Error> {
-    let conf = Config::from_args(env::args()).unwrap_or_else(|err| {
+    let conf = Config::from_args().unwrap_or_else(|err| {
         eprintln!("Error parsing args: {}", err);
         process::exit(1);
     });

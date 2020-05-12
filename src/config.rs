@@ -153,9 +153,8 @@ impl<'a, 'b> Config {
         Ok(config)
     }
 
-    pub fn from_args(_args: std::env::Args) -> Result<Config, Error> {
+    pub fn from_args() -> Result<Config, Error> {
         let matches = Self::get_app().get_matches();
-
         Self::config_from_matches(matches)
     }
 }
