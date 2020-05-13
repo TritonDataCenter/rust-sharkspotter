@@ -22,17 +22,20 @@ use sharkspotter::config::Config;
 use sharkspotter::util;
 use slog::Logger;
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::prelude::*;
 use std::io::Error;
 use std::path::Path;
 use std::process;
 
-fn write_mobj_to_file(
-    file: &mut File,
+fn write_mobj_to_file<W>(
+    mut writer: W,
     moray_obj: Value,
     full_object: bool,
-) -> Result<(), Error> {
+) -> Result<(), Error>
+where
+    W: Write,
+{
     let out_obj: Value;
 
     if !full_object {
@@ -47,9 +50,8 @@ fn write_mobj_to_file(
         out_obj = moray_obj;
     }
 
-    let buf = serde_json::to_string(&out_obj)?;
-    file.write_all(buf.as_bytes())?;
-    file.write_all(b"\n")?;
+    serde_json::to_writer(&mut writer, &out_obj)?;
+    writer.write_all(b"\n")?;
 
     Ok(())
 }
