@@ -1,6 +1,14 @@
-// Copyright 2019 Joyent, Inc.
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
 
-use clap::{App, AppSettings, Arg};
+/*
+ * Copyright 2020 Joyent, Inc.
+ */
+
+use clap::{App, AppSettings, Arg, ArgMatches};
 use std::io::Error;
 
 #[derive(Debug)]
@@ -34,12 +42,10 @@ impl Default for Config {
     }
 }
 
-impl Config {
-    // TODO:
-    // Allow the option of selecting which data to keep
-    pub fn from_args(_args: std::env::Args) -> Result<Config, Error> {
+impl<'a, 'b> Config {
+    pub fn get_app() -> App<'a, 'b> {
         let version = env!("CARGO_PKG_VERSION");
-        let matches = App::new("sharkspotter")
+        App::new("sharkspotter")
             .version(version)
             .about("A tool for finding all of the Manta objects that reside \
             on a given set of sharks (storage zones).")
@@ -108,8 +114,9 @@ impl Config {
                 .help("Write full moray objects to file instead of just the \
                 manta objects.")
                 .takes_value(false))
-            .get_matches();
+    }
 
+    fn config_from_matches(matches: ArgMatches) -> Result<Config, Error> {
         let mut config = Config::default();
 
         if let Ok(max_shard) = value_t!(matches, "max_shard", u32) {
@@ -136,7 +143,7 @@ impl Config {
             config.output_file = Some(output_file);
         }
 
-        if matches.is_present("x") {
+        if matches.is_present("skip_validate_sharks") {
             config.skip_validate_sharks = true;
         }
 
@@ -152,5 +159,62 @@ impl Config {
             .collect();
 
         Ok(config)
+    }
+
+    pub fn from_args() -> Result<Config, Error> {
+        let matches = Self::get_app().get_matches();
+        Self::config_from_matches(matches)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parse_args() {
+        let args = vec![
+            "target/debug/sharkspotter",
+            "-F",
+            "-x",
+            "--domain",
+            "east.joyent.us",
+            "--shark",
+            "1.stor",
+            "--shark",
+            "2.stor",
+            "-m",
+            "1",
+            "-M",
+            "2",
+            "-e",
+            "10",
+            "-b",
+            "3",
+            "-c",
+            "20",
+            "-f",
+            "foo.txt",
+        ];
+
+        let matches = Config::get_app().get_matches_from(args);
+        let config = Config::config_from_matches(matches).expect("config");
+
+        assert!(config.full_moray_obj);
+        assert!(config.skip_validate_sharks);
+
+        assert_eq!(config.max_shard, 2);
+        assert_eq!(config.min_shard, 1);
+        assert_eq!(config.begin, 3);
+        assert_eq!(config.end, 10);
+        assert_eq!(config.chunk_size, 20);
+
+        assert_eq!(config.output_file, Some(String::from("foo.txt")));
+        assert_eq!(config.domain, String::from("east.joyent.us"));
+
+        assert_eq!(
+            config.sharks,
+            vec![String::from("1.stor"), String::from("2.stor")]
+        );
     }
 }

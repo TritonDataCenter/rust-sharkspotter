@@ -1,20 +1,26 @@
-// Copyright 2019 Joyent, Inc.
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
 
-// Run sharkspotter as a commandline tool.
-//
-// By default sharkspotter will place all manta object metadata into a file
-// in json format.  The file will be of the form:
-//      shard_<shard_num>_<storage_id_number>.objs
-//
-// This file can be parsed with the `json` tool which allows users to filter
-// on json object certain fields.
+/*
+ * Copyright 2020 Joyent, Inc.
+ */
 
+/// Run sharkspotter as a commandline tool.
+///
+/// By default sharkspotter will place the manta object metadata into a file
+/// in json format.  The file will be of the form:
+///      <shark name>/shard_<shard_num>.objs
+///
+/// This file can be parsed with the `json` tool which allows users to filter
+/// on certain fields.
 use serde_json::Value;
 use sharkspotter::config::Config;
 use sharkspotter::util;
 use slog::Logger;
 use std::collections::HashMap;
-use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::prelude::*;
 use std::io::Error;
@@ -111,7 +117,7 @@ fn run_with_user_file(
 }
 
 fn main() -> Result<(), Error> {
-    let conf = Config::from_args(env::args()).unwrap_or_else(|err| {
+    let conf = Config::from_args().unwrap_or_else(|err| {
         eprintln!("Error parsing args: {}", err);
         process::exit(1);
     });
