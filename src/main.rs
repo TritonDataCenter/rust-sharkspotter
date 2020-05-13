@@ -16,13 +16,12 @@
 ///
 /// This file can be parsed with the `json` tool which allows users to filter
 /// on certain fields.
-
 use serde_json::Value;
 use sharkspotter::config::Config;
 use sharkspotter::util;
 use slog::Logger;
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::prelude::*;
 use std::io::Error;
 use std::path::Path;
@@ -34,7 +33,7 @@ fn write_mobj_to_file<W>(
     full_object: bool,
 ) -> Result<(), Error>
 where
-    W: Write
+    W: Write,
 {
     let out_obj: Value;
 
