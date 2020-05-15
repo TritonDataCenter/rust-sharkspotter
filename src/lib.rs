@@ -497,18 +497,13 @@ where
 
     for i in conf.min_shard..=conf.max_shard {
         let moray_host = format!("{}.moray.{}", i, conf.domain);
-        let moray_ip = match lookup_ip_str(moray_host.as_str()) {
-            Ok(ip) => ip,
-            Err(e) => {
-                error!(
-                    &log,
-                    "Error looking up moray host, skipping shard. {:#?}", e
-                );
-                continue;
-            }
-        };
+        let moray_ip = lookup_ip_str(moray_host.as_str())?;
         let moray_socket = format!("{}:{}", moray_ip, 2021);
 
+        // TODO: MANTA-4912
+        // We can have both _id and _idx, we don't have to have both, but we
+        // need at least 1.  This is an error that should be passed back to
+        // the caller via the handler as noted in MANTA-4912.
         for id in ["_id", "_idx"].iter() {
             if let Err(e) =
                 iter_ids(id, &moray_socket, &conf, log.clone(), i, &mut handler)

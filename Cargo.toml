@@ -1,6 +1,6 @@
 [package]
 name = "sharkspotter"
-version = "0.12.1"
+version = "0.12.2"
 authors = ["Rui Loura <rui@joyent.com>", "Jon Anderson <jon.anderson@joyent.com>"]
 edition = "2018"
 
