@@ -8,7 +8,6 @@
  * Copyright 2020 Joyent, Inc.
  */
 
-use crossbeam_channel::{self, Receiver, Sender};
 /// Run sharkspotter as a commandline tool.
 ///
 /// By default sharkspotter will place the manta object metadata into a file
@@ -17,6 +16,8 @@ use crossbeam_channel::{self, Receiver, Sender};
 ///
 /// This file can be parsed with the `json` tool which allows users to filter
 /// on certain fields.
+///
+use crossbeam_channel::{self, Receiver, Sender};
 use serde_json::Value;
 use sharkspotter::config::Config;
 use sharkspotter::{util, SharkspotterMessage};
@@ -62,8 +63,8 @@ fn run_multithreaded<F>(
     log: Logger,
     mut on_recv: F,
 ) -> Result<(), Error>
-    where
-        F: 'static
+where
+    F: 'static
         + std::marker::Send
         + FnMut(SharkspotterMessage) -> Result<(), Error>,
 {
@@ -114,18 +115,22 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
     }
     if conf.multithreaded {
         run_multithreaded(conf, log, move |msg| {
-            let shark = msg.shark.replace(domain_prefix.clone().as_str(), "");
+            let shark = msg.shark.replace(&domain_prefix, "");
             let shard = msg.shard;
             println!("shark: {}, shard: {}", shark, shard);
 
-            let file =
-                file_map.get_mut(&filename(shark.as_str(), shard)).unwrap();
+            // Only sharks that are in the config.sharks vector should be
+            // passed to the callback.  If we see a shark that wasn't
+            // specified that represents a programmer error.
+            let file = file_map
+                .get_mut(&filename(shark.as_str(), shard))
+                .expect("unexpected shark");
 
             write_mobj_to_file(file, msg.value, full_object)
         })
     } else {
         sharkspotter::run(conf, log, |moray_obj, shark, shard| {
-            let shark = shark.replace(domain_prefix.clone().as_str(), "");
+            let shark = shark.replace(&domain_prefix, "");
             println!("shark: {}, shard: {}", shark, shard);
 
             let file =

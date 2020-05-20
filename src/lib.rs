@@ -52,7 +52,6 @@ extern crate clap;
 pub mod config;
 pub mod util;
 
-use crossbeam_channel;
 use libmanta::moray::MantaObjectShark;
 use moray::client::MorayClient;
 use moray::objects as moray_objects;
@@ -420,7 +419,8 @@ fn lookup_ip_str(host: &str) -> Result<String, Error> {
 }
 
 fn shark_fix_common(conf: &mut config::Config, log: &Logger) {
-    let mut new_sharks = vec![];
+    let mut new_sharks = Vec::with_capacity(conf.sharks.len());
+
     for shark in conf.sharks.iter() {
         if !shark.contains(conf.domain.as_str()) {
             let new_shark = format!("{}.{}", shark, conf.domain);
