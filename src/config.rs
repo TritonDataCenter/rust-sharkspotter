@@ -11,7 +11,7 @@
 use clap::{App, AppSettings, Arg, ArgMatches};
 use std::io::Error;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     pub min_shard: u32,
     pub max_shard: u32,

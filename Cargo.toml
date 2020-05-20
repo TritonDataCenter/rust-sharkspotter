@@ -1,6 +1,6 @@
 [package]
 name = "sharkspotter"
-version = "0.12.2"
+version = "0.13.0"
 authors = ["Rui Loura <rui@joyent.com>", "Jon Anderson <jon.anderson@joyent.com>"]
 edition = "2018"
 
@@ -20,6 +20,7 @@ slog-term = "2.4.1"
 # If we don't specify the exact version here cargo will bring in a newer version
 # that is not compatible with rust 1.35.
 unicode-normalization = "=0.1.5"
+crossbeam-channel = "0.4.2"
 
 [patch.crates-io]
 # We require the use of certain constructs which unfortunately were not
