@@ -23,6 +23,7 @@ pub struct Config {
     pub skip_validate_sharks: bool,
     pub output_file: Option<String>,
     pub full_moray_obj: bool,
+    pub multithreaded: bool,
 }
 
 impl Default for Config {
@@ -38,6 +39,7 @@ impl Default for Config {
             skip_validate_sharks: false,
             output_file: None,
             full_moray_obj: false,
+            multithreaded: false,
         }
     }
 }
@@ -103,6 +105,11 @@ impl<'a, 'b> Config {
                 .value_name("FILE_NAME")
                 .help("output filename (default <shark>/shard_<shard_num>.objs")
                 .takes_value(true))
+            .arg(Arg::with_name("multithreaded")
+                .short("T")
+                .help("Run with multiple threads, one per shard")
+                .long("multithreaded")
+                .takes_value(false))
             .arg(Arg::with_name("skip_validate_sharks")
                 .short("x")
                 .help("Skip shark validation. Useful if shark is in readonly \
@@ -149,6 +156,10 @@ impl<'a, 'b> Config {
 
         if matches.is_present("full_moray_object") {
             config.full_moray_obj = true;
+        }
+
+        if matches.is_present("multithreaded") {
+            config.multithreaded = true;
         }
 
         config.domain = matches.value_of("domain").unwrap().to_string();
