@@ -58,13 +58,21 @@ use moray::objects as moray_objects;
 use serde::Deserialize;
 use serde_json::{self, Value};
 use slog::{debug, error, warn, Logger};
+use std::error::Error as StdError;
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
+use std::thread::{self, JoinHandle};
 use trust_dns_resolver::Resolver;
 
 #[derive(Deserialize, Debug, Clone)]
 struct IdRet {
     max: String,
+}
+
+pub struct SharkspotterMessage {
+    pub value: Value,
+    pub shark: String,
+    pub shard: u32,
 }
 
 fn _parse_max_id_value(val: Value, log: &Logger) -> Result<u64, Error> {
@@ -410,11 +418,34 @@ fn lookup_ip_str(host: &str) -> Result<String, Error> {
     Ok(ip[0].to_string())
 }
 
-fn validate_sharks(
-    sharks: &[String],
-    log: Logger,
-    domain: &str,
-) -> Result<(), Error> {
+fn shark_fix_common(conf: &mut config::Config, log: &Logger) {
+    let mut new_sharks = Vec::with_capacity(conf.sharks.len());
+
+    for shark in conf.sharks.iter() {
+        if !shark.contains(conf.domain.as_str()) {
+            let new_shark = format!("{}.{}", shark, conf.domain);
+            warn!(log,
+                  "Domain \"{}\" not found in storage node string:\"{}\", using \"{}\"",
+                  conf.domain,
+                  shark,
+                  new_shark
+            );
+
+            new_sharks.push(new_shark);
+        } else {
+            new_sharks.push(shark.to_owned());
+        }
+    }
+    conf.sharks = new_sharks;
+}
+
+fn validate_sharks(conf: &config::Config, log: &Logger) -> Result<(), Error> {
+    if conf.skip_validate_sharks {
+        return Ok(());
+    }
+
+    let sharks = &conf.sharks;
+    let domain = &conf.domain;
     let shard1_moray = format!("1.moray.{}", domain);
     let moray_ip = lookup_ip_str(shard1_moray.as_str())?;
     let moray_socket = format!("{}:{}", moray_ip, 2021);
@@ -467,33 +498,8 @@ pub fn run<F>(
 where
     F: FnMut(Value, &str, u32) -> Result<(), Error>,
 {
-    let mut new_sharks = vec![];
-    for shark in conf.sharks.iter() {
-        if !shark.contains(conf.domain.as_str()) {
-            let new_shark = format!("{}.{}", shark, conf.domain);
-            warn!(log,
-                  "Domain \"{}\" not found in storage node string:\"{}\", using \"{}\"",
-                  conf.domain,
-                  shark,
-                  new_shark
-            );
-
-            new_sharks.push(new_shark);
-        } else {
-            new_sharks.push(shark.to_owned());
-        }
-    }
-    conf.sharks = new_sharks;
-
-    if !conf.skip_validate_sharks {
-        match validate_sharks(&conf.sharks, log.clone(), &conf.domain) {
-            Ok(()) => (),
-            Err(e) => {
-                error!(log, "{}", e);
-                return Err(e);
-            }
-        }
-    }
+    shark_fix_common(&mut conf, &log);
+    validate_sharks(&conf, &log)?;
 
     for i in conf.min_shard..=conf.max_shard {
         let moray_host = format!("{}.moray.{}", i, conf.domain);
@@ -511,6 +517,72 @@ where
                 error!(&log, "Encountered error scanning shard {} ({})", i, e);
             }
         }
+    }
+
+    Ok(())
+}
+
+/// Same as the regular `run` method, but instead we spawn a new thread per
+/// shard and send the information back to the caller via a crossbeam
+/// mpmc channel.
+pub fn run_multithreaded(
+    mut conf: config::Config,
+    log: Logger,
+    obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
+) -> Result<(), Error> {
+    let mut shard_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
+
+    shark_fix_common(&mut conf, &log);
+    validate_sharks(&conf, &log)?;
+
+    for i in conf.min_shard..=conf.max_shard {
+        let shard_num = i;
+        let th_log = log.clone();
+        let th_conf = conf.clone();
+        let th_obj_tx = obj_tx.clone();
+        let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
+            .name(format!("shard_{}", i))
+            .spawn(move || {
+                let moray_host =
+                    format!("{}.moray.{}", shard_num, th_conf.domain);
+                let moray_ip = lookup_ip_str(moray_host.as_str())?;
+                let moray_socket = format!("{}:{}", moray_ip, 2021);
+
+                // TODO: MANTA-4912
+                // We can have both _id and _idx, we don't have to have both, but we
+                // need at least 1.  This is an error that should be passed back to
+                // the caller via the handler as noted in MANTA-4912.
+                for id in ["_id", "_idx"].iter() {
+                    if let Err(e) = iter_ids(
+                        id,
+                        &moray_socket,
+                        &th_conf,
+                        th_log.clone(),
+                        i,
+                        |value, shark, shard| {
+                            let msg = SharkspotterMessage {
+                                value,
+                                shark: shark.to_string(),
+                                shard,
+                            };
+                            th_obj_tx.send(msg).map_err(|e| {
+                                Error::new(ErrorKind::Other, e.description())
+                            })
+                        },
+                    ) {
+                        error!(
+                            &th_log,
+                            "Encountered error scanning shard {} ({})", i, e
+                        );
+                    }
+                }
+                Ok(())
+            })?;
+        shard_threads.push(handle);
+    }
+
+    for th in shard_threads {
+        th.join().expect("shard thread join").expect("shard thread");
     }
 
     Ok(())

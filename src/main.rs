@@ -16,9 +16,11 @@
 ///
 /// This file can be parsed with the `json` tool which allows users to filter
 /// on certain fields.
+///
+use crossbeam_channel::{self, Receiver, Sender};
 use serde_json::Value;
 use sharkspotter::config::Config;
-use sharkspotter::util;
+use sharkspotter::{util, SharkspotterMessage};
 use slog::Logger;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
@@ -26,6 +28,7 @@ use std::io::prelude::*;
 use std::io::Error;
 use std::path::Path;
 use std::process;
+use std::thread;
 
 fn write_mobj_to_file<W>(
     mut writer: W,
@@ -53,6 +56,31 @@ where
     writer.write_all(b"\n")?;
 
     Ok(())
+}
+
+fn run_multithreaded<F>(
+    conf: Config,
+    log: Logger,
+    mut on_recv: F,
+) -> Result<(), Error>
+where
+    F: 'static
+        + std::marker::Send
+        + FnMut(SharkspotterMessage) -> Result<(), Error>,
+{
+    let channel: (Sender<SharkspotterMessage>, Receiver<SharkspotterMessage>) =
+        crossbeam_channel::bounded(10);
+    let obj_tx = channel.0;
+    let obj_rx = channel.1;
+    let handle = thread::spawn(move || {
+        while let Ok(msg) = obj_rx.recv() {
+            on_recv(msg)?;
+        }
+        Ok(())
+    });
+
+    sharkspotter::run_multithreaded(conf, log, obj_tx)?;
+    handle.join().expect("sharkspotter reader join")
 }
 
 fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
@@ -85,15 +113,32 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
             file_map.insert(fname, file);
         }
     }
+    if conf.multithreaded {
+        run_multithreaded(conf, log, move |msg| {
+            let shark = msg.shark.replace(&domain_prefix, "");
+            let shard = msg.shard;
+            println!("shark: {}, shard: {}", shark, shard);
 
-    sharkspotter::run(conf, log, |moray_obj, shark, shard| {
-        let shark = shark.replace(domain_prefix.clone().as_str(), "");
-        println!("shark: {}, shard: {}", shark, shard);
+            // Only sharks that are in the config.sharks vector should be
+            // passed to the callback.  If we see a shark that wasn't
+            // specified that represents a programmer error.
+            let file = file_map
+                .get_mut(&filename(shark.as_str(), shard))
+                .expect("unexpected shark");
 
-        let file = file_map.get_mut(&filename(shark.as_str(), shard)).unwrap();
+            write_mobj_to_file(file, msg.value, full_object)
+        })
+    } else {
+        sharkspotter::run(conf, log, |moray_obj, shark, shard| {
+            let shark = shark.replace(&domain_prefix, "");
+            println!("shark: {}, shard: {}", shark, shard);
 
-        write_mobj_to_file(file, moray_obj, full_object)
-    })
+            let file =
+                file_map.get_mut(&filename(shark.as_str(), shard)).unwrap();
+
+            write_mobj_to_file(file, moray_obj, full_object)
+        })
+    }
 }
 
 fn run_with_user_file(
@@ -111,9 +156,15 @@ fn run_with_user_file(
         Ok(file) => file,
     };
 
-    sharkspotter::run(conf, log, |moray_obj, _shark, _shard| {
-        write_mobj_to_file(&mut file, moray_obj, full_object)
-    })
+    if conf.multithreaded {
+        run_multithreaded(conf, log, move |msg| {
+            write_mobj_to_file(&mut file, msg.value, full_object)
+        })
+    } else {
+        sharkspotter::run(conf, log, |moray_obj, _shark, _shard| {
+            write_mobj_to_file(&mut file, moray_obj, full_object)
+        })
+    }
 }
 
 fn main() -> Result<(), Error> {
