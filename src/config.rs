@@ -8,7 +8,7 @@
  * Copyright 2020 Joyent, Inc.
  */
 
-use clap::{App, AppSettings, Arg, ArgMatches};
+use clap::{value_t, App, AppSettings, Arg, ArgMatches};
 use std::io::Error;
 
 #[derive(Clone, Debug)]
