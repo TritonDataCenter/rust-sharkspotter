@@ -8,6 +8,9 @@
  * Copyright 2020 Joyent, Inc.
  */
 
+use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::prelude::*;
 /// Run sharkspotter as a commandline tool.
 ///
 /// By default sharkspotter will place the manta object metadata into a file
@@ -17,18 +20,16 @@
 /// This file can be parsed with the `json` tool which allows users to filter
 /// on certain fields.
 ///
+use std::io::{BufWriter, Error};
+use std::path::Path;
+use std::process;
+use std::thread;
+
 use crossbeam_channel::{self, Receiver, Sender};
 use serde_json::Value;
 use sharkspotter::config::Config;
 use sharkspotter::{util, SharkspotterMessage};
 use slog::Logger;
-use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
-use std::io::prelude::*;
-use std::io::Error;
-use std::path::Path;
-use std::process;
-use std::thread;
 
 fn write_mobj_to_file<W>(
     mut writer: W,
@@ -110,7 +111,7 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
                 Ok(file) => file,
             };
 
-            file_map.insert(fname, file);
+            file_map.insert(fname, BufWriter::new(file));
         }
     }
     if conf.multithreaded {
