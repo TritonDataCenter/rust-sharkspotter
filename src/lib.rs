@@ -66,6 +66,7 @@ struct IdRet {
     max: String,
 }
 
+#[derive(Debug)]
 pub struct SharkspotterMessage {
     pub value: Value,
     pub shark: String,
