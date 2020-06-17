@@ -29,31 +29,29 @@ use crossbeam_channel::{self, Receiver, Sender};
 use serde_json::Value;
 use sharkspotter::config::Config;
 use sharkspotter::{util, SharkspotterMessage};
-use slog::Logger;
+use slog::{debug, Logger};
 
 fn write_mobj_to_file<W>(
     mut writer: W,
-    moray_obj: Value,
+    moray_obj: &Value,
     full_object: bool,
 ) -> Result<(), Error>
 where
     W: Write,
 {
-    let out_obj: Value;
-
     if !full_object {
-        out_obj = match sharkspotter::manta_obj_from_moray_obj(&moray_obj) {
+        let out_obj = match sharkspotter::manta_obj_from_moray_obj(&moray_obj) {
             Ok(mo) => mo,
             Err(e) => {
                 eprintln!("{}", e);
                 return Ok(());
             }
-        }
+        };
+        serde_json::to_writer(&mut writer, &out_obj)?;
     } else {
-        out_obj = moray_obj;
+        serde_json::to_writer(&mut writer, moray_obj)?;
     }
 
-    serde_json::to_writer(&mut writer, &out_obj)?;
     writer.write_all(b"\n")?;
 
     Ok(())
@@ -118,7 +116,7 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
         run_multithreaded(conf, log, move |msg| {
             let shark = msg.shark.replace(&domain_prefix, "");
             let shard = msg.shard;
-            println!("shark: {}, shard: {}", shark, shard);
+            debug!(log, "shark: {}, shard: {}", shark, shard);
 
             // Only sharks that are in the config.sharks vector should be
             // passed to the callback.  If we see a shark that wasn't
@@ -127,12 +125,12 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
                 .get_mut(&filename(shark.as_str(), shard))
                 .expect("unexpected shark");
 
-            write_mobj_to_file(file, msg.value, full_object)
+            write_mobj_to_file(file, &msg.value, full_object)
         })
     } else {
         sharkspotter::run(conf, log, |moray_obj, shark, shard| {
             let shark = shark.replace(&domain_prefix, "");
-            println!("shark: {}, shard: {}", shark, shard);
+            debug!(log, "shark: {}, shard: {}", shark, shard);
 
             let file =
                 file_map.get_mut(&filename(shark.as_str(), shard)).unwrap();
@@ -159,7 +157,7 @@ fn run_with_user_file(
 
     if conf.multithreaded {
         run_multithreaded(conf, log, move |msg| {
-            write_mobj_to_file(&mut file, msg.value, full_object)
+            write_mobj_to_file(&mut file, &msg.value, full_object)
         })
     } else {
         sharkspotter::run(conf, log, |moray_obj, _shark, _shard| {

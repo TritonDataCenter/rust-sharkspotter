@@ -175,23 +175,13 @@ fn _log_return_error(log: &Logger, msg: &str) -> Result<(), Error> {
 pub fn manta_obj_from_moray_obj(moray_obj: &Value) -> Result<Value, String> {
     match moray_obj.get("_value") {
         Some(val) => {
-            let val_clone = val.clone();
-            let str_val = match val_clone.as_str() {
-                Some(s) => s,
-                None => {
-                    return Err(format!(
-                        "Could not format entry as string {:#?}",
-                        val
-                    ));
-                }
-            };
-
-            match serde_json::from_str(str_val) {
-                Ok(o) => Ok(o),
-                Err(e) => Err(format!(
-                    "Could not format entry as object {:#?} ({})",
-                    val, e
-                )),
+            if val.is_string() {
+                Ok(val.clone())
+            } else {
+                return Err(format!(
+                    "Could not format entry as string {:#?}",
+                    val
+                ));
             }
         }
         None => {
@@ -224,7 +214,7 @@ fn query_handler<F>(
     handler: &mut F,
 ) -> Result<(), Error>
 where
-    F: FnMut(Value, &str, u32) -> Result<(), Error>,
+    F: FnMut(&Value, &str, u32) -> Result<(), Error>,
 {
     match val.as_array() {
         Some(v) => {
@@ -245,18 +235,6 @@ where
         Some(v) => v,
         None => {
             return _log_return_error(log, "Entry is empty");
-        }
-    };
-
-    let moray_object: Value = match serde_json::from_value(moray_value.clone())
-    {
-        Ok(mo) => mo,
-        Err(e) => {
-            let msg = format!(
-                "Could not deserialize moray value {:#?}. ({})",
-                moray_value, e
-            );
-            return _log_return_error(log, &msg);
         }
     };
 
@@ -295,11 +273,7 @@ where
         .iter()
         .filter(|s| sharks_requested.contains(&s.manta_storage_id))
         .try_for_each(|s| {
-            handler(
-                moray_object.clone(),
-                s.manta_storage_id.as_str(),
-                shard_num,
-            )
+            handler(&moray_value, s.manta_storage_id.as_str(), shard_num)
         })?;
 
     Ok(())
@@ -324,7 +298,7 @@ fn read_chunk<F>(
     handler: &mut F,
 ) -> Result<(), Error>
 where
-    F: FnMut(Value, &str, u32) -> Result<(), Error>,
+    F: FnMut(&Value, &str, u32) -> Result<(), Error>,
 {
     match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
         query_handler(log, a, shard_num, sharks, handler)
@@ -348,7 +322,7 @@ fn iter_ids<F>(
     mut handler: F,
 ) -> Result<(), Error>
 where
-    F: FnMut(Value, &str, u32) -> Result<(), Error>,
+    F: FnMut(&Value, &str, u32) -> Result<(), Error>,
 {
     let mut mclient = MorayClient::from_str(moray_socket, log.clone(), None)?;
 
@@ -493,7 +467,7 @@ pub fn run<F>(
     mut handler: F,
 ) -> Result<(), Error>
 where
-    F: FnMut(Value, &str, u32) -> Result<(), Error>,
+    F: FnMut(&Value, &str, u32) -> Result<(), Error>,
 {
     shark_fix_common(&mut conf, &log);
     validate_sharks(&conf, &log)?;
@@ -558,7 +532,7 @@ pub fn run_multithreaded(
                         i,
                         |value, shark, shard| {
                             let msg = SharkspotterMessage {
-                                value,
+                                value: value.clone(),
                                 shark: shark.to_string(),
                                 shard,
                             };
