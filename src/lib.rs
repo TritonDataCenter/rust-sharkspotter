@@ -238,10 +238,29 @@ where
         }
     };
 
-    let _value = match manta_obj_from_moray_obj(moray_value) {
-        Ok(v) => v,
-        Err(e) => {
-            return _log_return_error(log, &e);
+    let _value: Value = match moray_value.get("_value") {
+        Some(val) if val.is_string() => {
+            match serde_json::from_str(val.as_str().expect("Could not return the associated string for Moray object _value field")) {
+                Ok(o) => o,
+                Err(e) => {
+                    let err_msg = format!(
+                    "Could not format entry as object {:#?} ({})",
+                        val, e);
+                    return _log_return_error(log, &err_msg);
+                },
+            }
+        }
+        Some(val) => {
+            let err_msg = format!("Could not format entry as string {:#?}", val);
+            return _log_return_error(
+                log,
+                &err_msg,
+            )
+        }
+        None => {
+            let err_msg =
+                format!("Missing '_value' in Moray entry {:#?}", moray_value);
+            return _log_return_error(log, &err_msg);
         }
     };
 
