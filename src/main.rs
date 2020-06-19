@@ -67,19 +67,20 @@ where
         + std::marker::Send
         + FnMut(SharkspotterMessage) -> Result<(), Error>,
 {
-    let channel: (Sender<SharkspotterMessage>, Receiver<SharkspotterMessage>) =
-        crossbeam_channel::bounded(10);
-    let obj_tx = channel.0;
-    let obj_rx = channel.1;
-    let handle = thread::spawn(move || {
-        while let Ok(msg) = obj_rx.recv() {
-            on_recv(msg)?;
-        }
-        Ok(())
-    });
+    // let channel: (Sender<SharkspotterMessage>, Receiver<SharkspotterMessage>) =
+    //     crossbeam_channel::bounded(10);
+    // let obj_tx = channel.0;
+    // let obj_rx = channel.1;
+    // let handle = thread::spawn(move || {
+    //     while let Ok(msg) = obj_rx.recv() {
+    //         on_recv(msg)?;
+    //     }
+    //     Ok(())
+    // });
 
-    sharkspotter::run_multithreaded(conf, log, obj_tx)?;
-    handle.join().expect("sharkspotter reader join")
+    // sharkspotter::run_multithreaded(conf, log, obj_tx)?;
+    // handle.join().expect("sharkspotter reader join")
+    std::unimplemented!();
 }
 
 fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
@@ -128,7 +129,7 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
             write_mobj_to_file(file, &msg.value, full_object)
         })
     } else {
-        sharkspotter::run(conf, log.clone(), |moray_obj, shark, shard| {
+        sharkspotter::run(conf, log.clone(), move |moray_obj, shark, shard| {
             let shark = shark.replace(&domain_prefix, "");
             debug!(log, "shark: {}, shard: {}", shark, shard);
 
@@ -160,7 +161,7 @@ fn run_with_user_file(
             write_mobj_to_file(&mut file, &msg.value, full_object)
         })
     } else {
-        sharkspotter::run(conf, log, |moray_obj, _shark, _shard| {
+        sharkspotter::run(conf, log, move |moray_obj, _shark, _shard| {
             write_mobj_to_file(&mut file, moray_obj, full_object)
         })
     }

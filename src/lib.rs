@@ -49,6 +49,8 @@
 pub mod config;
 pub mod util;
 
+use std::convert::TryInto;
+
 use libmanta::moray::MantaObjectShark;
 use moray::client::MorayClient;
 use moray::objects as moray_objects;
@@ -58,6 +60,7 @@ use slog::{debug, error, warn, Logger};
 use std::error::Error as StdError;
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use trust_dns_resolver::Resolver;
 
@@ -190,6 +193,31 @@ pub fn manta_obj_from_moray_obj(moray_obj: &Value) -> Result<Value, String> {
     }
 }
 
+fn run_query_handler(
+    chunk_data: Vec<Value>,
+    log: &Logger,
+    shard_num: u32,
+    sharks_requested: &[String],
+    handler: Arc<impl FnMut(&Value, &str, u32) -> Result<(), Error>>,
+) -> Result<(), Error>
+// where
+//     F: FnMut(&Value, &str, u32) -> Result<(), Error>,
+{
+    for c in chunk_data {
+        let log_clone = log.clone();
+        let handler_clone = Arc::clone(&handler);
+        query_handler(
+            &log_clone,
+            &c,
+            shard_num,
+            &sharks_requested,
+            handler_clone,
+        )
+        .expect("query_handler returned an error")
+    }
+    Ok(())
+}
+
 // TODO: add tests for this function
 // See block comment at top of a file for an example of the object this is
 // working with.
@@ -211,89 +239,89 @@ fn query_handler<F>(
     val: &Value,
     shard_num: u32,
     sharks_requested: &[String],
-    handler: &mut F,
+    handler: Arc<F>,
 ) -> Result<(), Error>
 where
     F: FnMut(&Value, &str, u32) -> Result<(), Error>,
 {
-    match val.as_array() {
-        Some(v) => {
-            if v.len() > 1 {
-                warn!(
-                    log,
-                    "Expected 1 value, got {}.  Using first entry.",
-                    v.len()
-                );
-            }
-        }
-        None => {
-            return _log_return_error(log, "Entry is not an array");
-        }
-    }
+    // match val.as_array() {
+    //     Some(v) => {
+    //         if v.len() > 1 {
+    //             warn!(
+    //                 log,
+    //                 "Expected 1 value, got {}.  Using first entry.",
+    //                 v.len()
+    //             );
+    //         }
+    //     }
+    //     None => {
+    //         return _log_return_error(log, "Entry is not an array");
+    //     }
+    // }
 
-    let moray_value = match val.get(0) {
-        Some(v) => v,
-        None => {
-            return _log_return_error(log, "Entry is empty");
-        }
-    };
+    // let moray_value = match val.get(0) {
+    //     Some(v) => v,
+    //     None => {
+    //         return _log_return_error(log, "Entry is empty");
+    //     }
+    // };
 
-    let _value: Value = match moray_value.get("_value") {
-        Some(val) if val.is_string() => {
-            match serde_json::from_str(val.as_str().expect("Could not return the associated string for Moray object _value field")) {
-                Ok(o) => o,
-                Err(e) => {
-                    let err_msg = format!(
-                    "Could not format entry as object {:#?} ({})",
-                        val, e);
-                    return _log_return_error(log, &err_msg);
-                },
-            }
-        }
-        Some(val) => {
-            let err_msg = format!("Could not format entry as string {:#?}", val);
-            return _log_return_error(
-                log,
-                &err_msg,
-            )
-        }
-        None => {
-            let err_msg =
-                format!("Missing '_value' in Moray entry {:#?}", moray_value);
-            return _log_return_error(log, &err_msg);
-        }
-    };
+    // let _value: Value = match moray_value.get("_value") {
+    //     Some(val) if val.is_string() => {
+    //         match serde_json::from_str(val.as_str().expect("Could not return the associated string for Moray object _value field")) {
+    //             Ok(o) => o,
+    //             Err(e) => {
+    //                 let err_msg = format!(
+    //                 "Could not format entry as object {:#?} ({})",
+    //                     val, e);
+    //                 return _log_return_error(log, &err_msg);
+    //             },
+    //         }
+    //     }
+    //     Some(val) => {
+    //         let err_msg = format!("Could not format entry as string {:#?}", val);
+    //         return _log_return_error(
+    //             log,
+    //             &err_msg,
+    //         )
+    //     }
+    //     None => {
+    //         let err_msg =
+    //             format!("Missing '_value' in Moray entry {:#?}", moray_value);
+    //         return _log_return_error(log, &err_msg);
+    //     }
+    // };
 
-    let sharks: Vec<MantaObjectShark> = match _value.get("sharks") {
-        Some(s) => {
-            if !s.is_array() {
-                let msg = format!("Sharks are not in an array {:#?}", s);
-                return _log_return_error(log, &msg);
-            }
-            match serde_json::from_value::<Vec<MantaObjectShark>>(s.clone()) {
-                Ok(mos) => mos,
-                Err(e) => {
-                    let msg = format!(
-                        "Could not deserialize sharks value {:#?}. ({})",
-                        s, e
-                    );
-                    return _log_return_error(log, &msg);
-                }
-            }
-        }
-        None => {
-            let msg = format!("Missing 'sharks' field {:#?}", _value);
-            return _log_return_error(log, &msg);
-        }
-    };
+    // let sharks: Vec<MantaObjectShark> = match _value.get("sharks") {
+    //     Some(s) => {
+    //         if !s.is_array() {
+    //             let msg = format!("Sharks are not in an array {:#?}", s);
+    //             return _log_return_error(log, &msg);
+    //         }
+    //         match serde_json::from_value::<Vec<MantaObjectShark>>(s.clone()) {
+    //             Ok(mos) => mos,
+    //             Err(e) => {
+    //                 let msg = format!(
+    //                     "Could not deserialize sharks value {:#?}. ({})",
+    //                     s, e
+    //                 );
+    //                 return _log_return_error(log, &msg);
+    //             }
+    //         }
+    //     }
+    //     None => {
+    //         let msg = format!("Missing 'sharks' field {:#?}", _value);
+    //         return _log_return_error(log, &msg);
+    //     }
+    // };
 
-    // Filter on shark
-    sharks
-        .iter()
-        .filter(|s| sharks_requested.contains(&s.manta_storage_id))
-        .try_for_each(|s| {
-            handler(&moray_value, s.manta_storage_id.as_str(), shard_num)
-        })?;
+    // // Filter on shark
+    // sharks
+    //     .iter()
+    //     .filter(|s| sharks_requested.contains(&s.manta_storage_id))
+    //     .try_for_each(|s| {
+    //         handler(&moray_value, s.manta_storage_id.as_str(), shard_num)
+    //     })?;
 
     Ok(())
 }
@@ -308,19 +336,38 @@ fn chunk_query(id_name: &str, begin: u64, end: u64, count: u64) -> String {
 
 /// Make the actual sql query and call the query_handler to handle processing
 /// every object that is returned in the chunk.
-fn read_chunk<F>(
-    log: &Logger,
+// fn read_chunk<F>(
+//     log: &Logger,
+//     mclient: &mut MorayClient,
+//     query: &str,
+//     shard_num: u32,
+//     sharks: &[String],
+//     handler: &mut F,
+// ) -> Result<(), Error>
+// where
+//     F: FnMut(&Value, &str, u32) -> Result<(), Error>,
+// {
+//     match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
+//         query_handler(log, a, shard_num, sharks, handler)
+//     }) {
+//         Ok(()) => Ok(()),
+//         Err(e) => {
+//             eprintln!("Got error: {}", e);
+//             Err(e)
+//         }
+//     }
+// }
+
+/// Make the actual sql query and call the query_handler to handle processing
+/// every object that is returned in the chunk.
+fn read_chunk2(
     mclient: &mut MorayClient,
     query: &str,
-    shard_num: u32,
-    sharks: &[String],
-    handler: &mut F,
-) -> Result<(), Error>
-where
-    F: FnMut(&Value, &str, u32) -> Result<(), Error>,
-{
+    query_results: &mut Vec<Value>,
+) -> Result<(), Error> {
     match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
-        query_handler(log, a, shard_num, sharks, handler)
+        query_results.push(a.to_owned());
+        Ok(())
     }) {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -338,10 +385,11 @@ fn iter_ids<F>(
     conf: &config::Config,
     log: Logger,
     shard_num: u32,
-    mut handler: F,
+    handler: Arc<F>,
+    // handler: Arc<impl FnMut(&Value, &str, u32) -> Result<(), Error>> + Send,
 ) -> Result<(), Error>
 where
-    F: FnMut(&Value, &str, u32) -> Result<(), Error>,
+    F: FnMut(&Value, &str, u32) -> Result<(), Error> + Send + Sync + 'static,
 {
     let mut mclient = MorayClient::from_str(moray_socket, log.clone(), None)?;
 
@@ -361,19 +409,47 @@ where
         end_id = conf.end;
     }
 
+    let mut chunk_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
+    // let handler_arc = Arc::new(handler);
+
     while remaining > 0 {
         let query = chunk_query(id_name, start_id, end_id, conf.chunk_size);
-        match read_chunk(
-            &log,
-            &mut mclient,
-            query.as_str(),
-            shard_num,
-            &conf.sharks,
-            &mut handler,
-        ) {
+        let mut chunk_data: Vec<Value> =
+            Vec::with_capacity(conf.chunk_size.try_into().unwrap());
+        match read_chunk2(&mut mclient, query.as_str(), &mut chunk_data) {
             Ok(()) => (),
             Err(e) => return Err(e),
         };
+
+        let sharks_copy = conf.sharks.clone();
+        let log_clone = log.clone();
+        let handler_clone = Arc::clone(&handler);
+        let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
+            .name(format!("shard_chunk_{}", shard_num))
+            .spawn(move || {
+                // for c in chunk_data {
+                //     query_handler(
+                //         &log_clone,
+                //         &c,
+                //         shard_num,
+                //         &sharks_copy,
+                //         handler_clone,
+                //     )
+                //     .expect("query_handler returned an error")
+                // }
+                run_query_handler(
+                    chunk_data,
+                    &log_clone,
+                    shard_num,
+                    &sharks_copy,
+                    handler_clone,
+                )
+                .expect("query_handler returned an error");
+                Ok(())
+            })
+            .expect("Failed to create chunk thread");
+
+        chunk_threads.push(handle);
 
         start_id = end_id + 1;
         if start_id > largest_id {
@@ -395,6 +471,10 @@ where
             end_id,
             remaining
         );
+    }
+
+    for th in chunk_threads {
+        th.join().expect("chunk thread join").expect("chunk thread");
     }
 
     Ok(())
@@ -483,13 +563,15 @@ fn validate_sharks(conf: &config::Config, log: &Logger) -> Result<(), Error> {
 pub fn run<F>(
     mut conf: config::Config,
     log: Logger,
-    mut handler: F,
+    handler: F,
 ) -> Result<(), Error>
 where
-    F: FnMut(&Value, &str, u32) -> Result<(), Error>,
+    F: FnMut(&Value, &str, u32) -> Result<(), Error> + Send + Sync + 'static,
 {
     shark_fix_common(&mut conf, &log);
     validate_sharks(&conf, &log)?;
+
+    let handler_arc = Arc::new(handler);
 
     for i in conf.min_shard..=conf.max_shard {
         let moray_host = format!("{}.moray.{}", i, conf.domain);
@@ -501,9 +583,15 @@ where
         // need at least 1.  This is an error that should be passed back to
         // the caller via the handler as noted in MANTA-4912.
         for id in ["_id", "_idx"].iter() {
-            if let Err(e) =
-                iter_ids(id, &moray_socket, &conf, log.clone(), i, &mut handler)
-            {
+            let handler_clone = Arc::clone(&handler_arc);
+            if let Err(e) = iter_ids(
+                id,
+                &moray_socket,
+                &conf,
+                log.clone(),
+                i,
+                handler_clone,
+            ) {
                 error!(&log, "Encountered error scanning shard {} ({})", i, e);
             }
         }
@@ -512,71 +600,71 @@ where
     Ok(())
 }
 
-/// Same as the regular `run` method, but instead we spawn a new thread per
-/// shard and send the information back to the caller via a crossbeam
-/// mpmc channel.
-pub fn run_multithreaded(
-    mut conf: config::Config,
-    log: Logger,
-    obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
-) -> Result<(), Error> {
-    let mut shard_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
+// /// Same as the regular `run` method, but instead we spawn a new thread per
+// /// shard and send the information back to the caller via a crossbeam
+// /// mpmc channel.
+// pub fn run_multithreaded(
+//     mut conf: config::Config,
+//     log: Logger,
+//     obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
+// ) -> Result<(), Error> {
+//     let mut shard_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
 
-    shark_fix_common(&mut conf, &log);
-    validate_sharks(&conf, &log)?;
+//     shark_fix_common(&mut conf, &log);
+//     validate_sharks(&conf, &log)?;
 
-    for i in conf.min_shard..=conf.max_shard {
-        let shard_num = i;
-        let th_log = log.clone();
-        let th_conf = conf.clone();
-        let th_obj_tx = obj_tx.clone();
-        let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
-            .name(format!("shard_{}", i))
-            .spawn(move || {
-                let moray_host =
-                    format!("{}.moray.{}", shard_num, th_conf.domain);
-                let moray_ip = lookup_ip_str(moray_host.as_str())?;
-                let moray_socket = format!("{}:{}", moray_ip, 2021);
+//     for i in conf.min_shard..=conf.max_shard {
+//         let shard_num = i;
+//         let th_log = log.clone();
+//         let th_conf = conf.clone();
+//         let th_obj_tx = obj_tx.clone();
+//         let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
+//             .name(format!("shard_{}", i))
+//             .spawn(move || {
+//                 let moray_host =
+//                     format!("{}.moray.{}", shard_num, th_conf.domain);
+//                 let moray_ip = lookup_ip_str(moray_host.as_str())?;
+//                 let moray_socket = format!("{}:{}", moray_ip, 2021);
 
-                // TODO: MANTA-4912
-                // We can have both _id and _idx, we don't have to have both, but we
-                // need at least 1.  This is an error that should be passed back to
-                // the caller via the handler as noted in MANTA-4912.
-                for id in ["_id", "_idx"].iter() {
-                    if let Err(e) = iter_ids(
-                        id,
-                        &moray_socket,
-                        &th_conf,
-                        th_log.clone(),
-                        i,
-                        |value, shark, shard| {
-                            let msg = SharkspotterMessage {
-                                value: value.clone(),
-                                shark: shark.to_string(),
-                                shard,
-                            };
-                            th_obj_tx.send(msg).map_err(|e| {
-                                Error::new(ErrorKind::Other, e.description())
-                            })
-                        },
-                    ) {
-                        error!(
-                            &th_log,
-                            "Encountered error scanning shard {} ({})", i, e
-                        );
-                    }
-                }
-                Ok(())
-            })?;
-        shard_threads.push(handle);
-    }
+//                 // TODO: MANTA-4912
+//                 // We can have both _id and _idx, we don't have to have both, but we
+//                 // need at least 1.  This is an error that should be passed back to
+//                 // the caller via the handler as noted in MANTA-4912.
+//                 for id in ["_id", "_idx"].iter() {
+//                     if let Err(e) = iter_ids(
+//                         id,
+//                         &moray_socket,
+//                         &th_conf,
+//                         th_log.clone(),
+//                         i,
+//                         |value: &Value, shark: &str, shard| {
+//                             let msg = SharkspotterMessage {
+//                                 value: value.clone(),
+//                                 shark: shark.to_string(),
+//                                 shard,
+//                             };
+//                             th_obj_tx.send(msg).map_err(|e| {
+//                                 Error::new(ErrorKind::Other, e.description())
+//                             })
+//                         },
+//                     ) {
+//                         error!(
+//                             &th_log,
+//                             "Encountered error scanning shard {} ({})", i, e
+//                         );
+//                     }
+//                 }
+//                 Ok(())
+//             })?;
+//         shard_threads.push(handle);
+//     }
 
-    for th in shard_threads {
-        th.join().expect("shard thread join").expect("shard thread");
-    }
+//     for th in shard_threads {
+//         th.join().expect("shard thread join").expect("shard thread");
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 #[cfg(test)]
 mod tests {
