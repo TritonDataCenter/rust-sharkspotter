@@ -60,7 +60,7 @@ use slog::{debug, error, warn, Logger};
 use std::error::Error as StdError;
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use trust_dns_resolver::Resolver;
 
@@ -198,7 +198,7 @@ fn run_query_handler(
     log: &Logger,
     shard_num: u32,
     sharks_requested: &[String],
-    handler: Arc<impl FnMut(&Value, &str, u32) -> Result<(), Error>>,
+    handler: Arc<Mutex<impl FnMut(&Value, &str, u32) -> Result<(), Error>>>,
 ) -> Result<(), Error>
 // where
 //     F: FnMut(&Value, &str, u32) -> Result<(), Error>,
@@ -239,89 +239,101 @@ fn query_handler<F>(
     val: &Value,
     shard_num: u32,
     sharks_requested: &[String],
-    handler: Arc<F>,
+    handler: Arc<Mutex<F>>,
 ) -> Result<(), Error>
 where
     F: FnMut(&Value, &str, u32) -> Result<(), Error>,
 {
-    // match val.as_array() {
-    //     Some(v) => {
-    //         if v.len() > 1 {
-    //             warn!(
-    //                 log,
-    //                 "Expected 1 value, got {}.  Using first entry.",
-    //                 v.len()
-    //             );
-    //         }
-    //     }
-    //     None => {
-    //         return _log_return_error(log, "Entry is not an array");
-    //     }
-    // }
+    match val.as_array() {
+        Some(v) => {
+            if v.len() > 1 {
+                warn!(
+                    log,
+                    "Expected 1 value, got {}.  Using first entry.",
+                    v.len()
+                );
+            }
+        }
+        None => {
+            return _log_return_error(log, "Entry is not an array");
+        }
+    }
 
-    // let moray_value = match val.get(0) {
-    //     Some(v) => v,
-    //     None => {
-    //         return _log_return_error(log, "Entry is empty");
-    //     }
-    // };
+    let moray_value = match val.get(0) {
+        Some(v) => v,
+        None => {
+            return _log_return_error(log, "Entry is empty");
+        }
+    };
 
-    // let _value: Value = match moray_value.get("_value") {
-    //     Some(val) if val.is_string() => {
-    //         match serde_json::from_str(val.as_str().expect("Could not return the associated string for Moray object _value field")) {
-    //             Ok(o) => o,
-    //             Err(e) => {
-    //                 let err_msg = format!(
-    //                 "Could not format entry as object {:#?} ({})",
-    //                     val, e);
-    //                 return _log_return_error(log, &err_msg);
-    //             },
-    //         }
-    //     }
-    //     Some(val) => {
-    //         let err_msg = format!("Could not format entry as string {:#?}", val);
-    //         return _log_return_error(
-    //             log,
-    //             &err_msg,
-    //         )
-    //     }
-    //     None => {
-    //         let err_msg =
-    //             format!("Missing '_value' in Moray entry {:#?}", moray_value);
-    //         return _log_return_error(log, &err_msg);
-    //     }
-    // };
+    let _value: Value = match moray_value.get("_value") {
+        Some(val) if val.is_string() => {
+            match serde_json::from_str(val.as_str().expect("Could not return the associated string for Moray object _value field")) {
+                Ok(o) => o,
+                Err(e) => {
+                    let err_msg = format!(
+                    "Could not format entry as object {:#?} ({})",
+                        val, e);
+                    return _log_return_error(log, &err_msg);
+                },
+            }
+        }
+        Some(val) => {
+            let err_msg = format!("Could not format entry as string {:#?}", val);
+            return _log_return_error(
+                log,
+                &err_msg,
+            )
+        }
+        None => {
+            let err_msg =
+                format!("Missing '_value' in Moray entry {:#?}", moray_value);
+            return _log_return_error(log, &err_msg);
+        }
+    };
 
-    // let sharks: Vec<MantaObjectShark> = match _value.get("sharks") {
-    //     Some(s) => {
-    //         if !s.is_array() {
-    //             let msg = format!("Sharks are not in an array {:#?}", s);
-    //             return _log_return_error(log, &msg);
-    //         }
-    //         match serde_json::from_value::<Vec<MantaObjectShark>>(s.clone()) {
-    //             Ok(mos) => mos,
-    //             Err(e) => {
-    //                 let msg = format!(
-    //                     "Could not deserialize sharks value {:#?}. ({})",
-    //                     s, e
-    //                 );
-    //                 return _log_return_error(log, &msg);
-    //             }
-    //         }
-    //     }
-    //     None => {
-    //         let msg = format!("Missing 'sharks' field {:#?}", _value);
-    //         return _log_return_error(log, &msg);
-    //     }
-    // };
+    let sharks: Vec<MantaObjectShark> = match _value.get("sharks") {
+        Some(s) => {
+            if !s.is_array() {
+                let msg = format!("Sharks are not in an array {:#?}", s);
+                return _log_return_error(log, &msg);
+            }
+            match serde_json::from_value::<Vec<MantaObjectShark>>(s.clone()) {
+                Ok(mos) => mos,
+                Err(e) => {
+                    let msg = format!(
+                        "Could not deserialize sharks value {:#?}. ({})",
+                        s, e
+                    );
+                    return _log_return_error(log, &msg);
+                }
+            }
+        }
+        None => {
+            let msg = format!("Missing 'sharks' field {:#?}", _value);
+            return _log_return_error(log, &msg);
+        }
+    };
 
-    // // Filter on shark
+    // Filter on shark
     // sharks
     //     .iter()
-    //     .filter(|s| sharks_requested.contains(&s.manta_storage_id))
+    //     .filter(|s| sharks_requested.contains(&s.manta_storage_id));
     //     .try_for_each(|s| {
     //         handler(&moray_value, s.manta_storage_id.as_str(), shard_num)
     //     })?;
+
+    for s in sharks {
+        if sharks_requested.contains(&s.manta_storage_id) {
+            let handler_clone = Arc::clone(&handler);
+            let mut handler_clone = handler_clone.lock().unwrap();
+            let _ = (&mut *handler_clone)(
+                &moray_value,
+                s.manta_storage_id.as_str(),
+                shard_num,
+            );
+        }
+    }
 
     Ok(())
 }
@@ -385,7 +397,7 @@ fn iter_ids<F>(
     conf: &config::Config,
     log: Logger,
     shard_num: u32,
-    handler: Arc<F>,
+    handler: Arc<Mutex<F>>,
     // handler: Arc<impl FnMut(&Value, &str, u32) -> Result<(), Error>> + Send,
 ) -> Result<(), Error>
 where
@@ -571,7 +583,7 @@ where
     shark_fix_common(&mut conf, &log);
     validate_sharks(&conf, &log)?;
 
-    let handler_arc = Arc::new(handler);
+    let handler_arc = Arc::new(Mutex::new(handler));
 
     for i in conf.min_shard..=conf.max_shard {
         let moray_host = format!("{}.moray.{}", i, conf.domain);
