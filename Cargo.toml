@@ -9,8 +9,9 @@ assert_cli = "0.6.0"
 serde = { version = "1.0.89", features = ["derive"] }
 serde_json = "1.0.39"
 clap = "2.33.0"
+cueball = "0.3.1"
 libmanta = { git = "https://github.com/joyent/rust-libmanta", tag = "v0.7.0" }
-moray = { git = "https://github.com/joyent/rust-moray", tag="v0.9.3" }
+moray = { git = "https://github.com/joyent/rust-moray" }
 slog = { version = "2.5.2", features = ["max_level_trace", "release_max_level_warn"] }
 slog-bunyan = "2.2.0"
 trust-dns-resolver = "0.11.1"

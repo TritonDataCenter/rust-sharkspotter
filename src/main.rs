@@ -112,6 +112,7 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
                 crossbeam_channel::bounded(100);
             let obj_tx = channel.0;
             let obj_rx = channel.1;
+            let log_clone = log.clone();
             let _handle: thread::JoinHandle<Result<(), Error>> =
                 thread::spawn(move || {
                     let path = Path::new(fname_clone.as_str());
@@ -129,6 +130,7 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
                             }),
                     );
                     while let Ok(msg) = obj_rx.recv() {
+                        debug!(log_clone, "Recevied message: {}", &msg);
                         if !full_object {
                             let out_obj =
                                 match sharkspotter::manta_obj_from_moray_obj(
@@ -186,6 +188,7 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
             let file_sender =
                 file_map.get(&filename(shark.as_str(), shard)).unwrap();
 
+            debug!(log, "Sending message to file thread: {}", &moray_obj);
             file_sender
                 .send(moray_obj.clone())
                 .map_err(|_e| Error::new(ErrorKind::Other, "err"))

@@ -51,6 +51,7 @@ pub mod util;
 
 use std::convert::TryInto;
 
+use cueball::connection_pool::types::ConnectionPoolOptions;
 use libmanta::moray::MantaObjectShark;
 use moray::client::MorayClient;
 use moray::objects as moray_objects;
@@ -199,10 +200,7 @@ fn run_query_handler(
     shard_num: u32,
     sharks_requested: &[String],
     handler: Arc<Mutex<impl FnMut(&Value, &str, u32) -> Result<(), Error>>>,
-) -> Result<(), Error>
-// where
-//     F: FnMut(&Value, &str, u32) -> Result<(), Error>,
-{
+) -> Result<(), Error> {
     for c in chunk_data {
         let log_clone = log.clone();
         let handler_clone = Arc::clone(&handler);
@@ -325,6 +323,7 @@ where
 
     for s in sharks {
         if sharks_requested.contains(&s.manta_storage_id) {
+            debug!(log, "Calling handler on moray value {}", &moray_value);
             let handler_clone = Arc::clone(&handler);
             let mut handler_clone = handler_clone.lock().unwrap();
             let _ = (&mut *handler_clone)(
@@ -373,7 +372,7 @@ fn chunk_query(id_name: &str, begin: u64, end: u64, count: u64) -> String {
 /// Make the actual sql query and call the query_handler to handle processing
 /// every object that is returned in the chunk.
 fn read_chunk2(
-    mclient: &mut MorayClient,
+    mut mclient: MorayClient,
     query: &str,
     query_results: &mut Vec<Value>,
 ) -> Result<(), Error> {
@@ -398,12 +397,20 @@ fn iter_ids<F>(
     log: Logger,
     shard_num: u32,
     handler: Arc<Mutex<F>>,
-    // handler: Arc<impl FnMut(&Value, &str, u32) -> Result<(), Error>> + Send,
 ) -> Result<(), Error>
 where
     F: FnMut(&Value, &str, u32) -> Result<(), Error> + Send + Sync + 'static,
 {
-    let mut mclient = MorayClient::from_str(moray_socket, log.clone(), None)?;
+    let cueball_opts = ConnectionPoolOptions {
+        max_connections: Some(20),
+        claim_timeout: None,
+        log: Some(log.clone()),
+        rebalancer_action_delay: None, // Default 100ms
+        decoherence_interval: None,    // Default 300s
+        connection_check_interval: None, // Default 30s
+    };
+    let mut mclient =
+        MorayClient::from_str(moray_socket, log.clone(), Some(cueball_opts))?;
 
     let mut start_id = conf.begin;
     let mut end_id = conf.begin + conf.chunk_size - 1;
@@ -422,23 +429,27 @@ where
     }
 
     let mut chunk_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
-    // let handler_arc = Arc::new(handler);
 
     while remaining > 0 {
         let query = chunk_query(id_name, start_id, end_id, conf.chunk_size);
         let mut chunk_data: Vec<Value> =
             Vec::with_capacity(conf.chunk_size.try_into().unwrap());
-        match read_chunk2(&mut mclient, query.as_str(), &mut chunk_data) {
-            Ok(()) => (),
-            Err(e) => return Err(e),
-        };
-
         let sharks_copy = conf.sharks.clone();
         let log_clone = log.clone();
         let handler_clone = Arc::clone(&handler);
+        let mclient_clone = mclient.clone();
         let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
             .name(format!("shard_chunk_{}", shard_num))
             .spawn(move || {
+                match read_chunk2(
+                    mclient_clone,
+                    query.as_str(),
+                    &mut chunk_data,
+                ) {
+                    Ok(()) => (),
+                    Err(e) => return Err(e),
+                };
+
                 // for c in chunk_data {
                 //     query_handler(
                 //         &log_clone,
