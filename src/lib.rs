@@ -65,6 +65,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use trust_dns_resolver::Resolver;
 
+use threadpool::ThreadPool;
+
 #[derive(Deserialize, Debug, Clone)]
 struct IdRet {
     max: String,
@@ -429,6 +431,7 @@ where
     }
 
     let mut chunk_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
+    let t_pool = ThreadPool::new(100);
 
     while remaining > 0 {
         let query = chunk_query(id_name, start_id, end_id, conf.chunk_size);
@@ -438,41 +441,39 @@ where
         let log_clone = log.clone();
         let handler_clone = Arc::clone(&handler);
         let mclient_clone = mclient.clone();
-        let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
-            .name(format!("shard_chunk_{}", shard_num))
-            .spawn(move || {
-                match read_chunk2(
-                    mclient_clone,
-                    query.as_str(),
-                    &mut chunk_data,
-                ) {
-                    Ok(()) => (),
-                    Err(e) => return Err(e),
-                };
 
-                // for c in chunk_data {
-                //     query_handler(
-                //         &log_clone,
-                //         &c,
-                //         shard_num,
-                //         &sharks_copy,
-                //         handler_clone,
-                //     )
-                //     .expect("query_handler returned an error")
-                // }
-                run_query_handler(
-                    chunk_data,
-                    &log_clone,
-                    shard_num,
-                    &sharks_copy,
-                    handler_clone,
-                )
-                .expect("query_handler returned an error");
-                Ok(())
-            })
-            .expect("Failed to create chunk thread");
+        // let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
+        //     .name(format!("shard_chunk_{}", shard_num))
+        //     .spawn(move ||
+        t_pool.execute(move || {
+            match read_chunk2(mclient_clone, query.as_str(), &mut chunk_data) {
+                Ok(()) => (),
+                Err(e) => {
+                    warn!(log_clone, "Error occurred reading chunk: {}", e);
+                }
+            };
 
-        chunk_threads.push(handle);
+            // for c in chunk_data {
+            //     query_handler(
+            //         &log_clone,
+            //         &c,
+            //         shard_num,
+            //         &sharks_copy,
+            //         handler_clone,
+            //     )
+            //     .expect("query_handler returned an error")
+            // }
+            run_query_handler(
+                chunk_data,
+                &log_clone,
+                shard_num,
+                &sharks_copy,
+                handler_clone,
+            )
+            .expect("query_handler returned an error");
+        });
+
+        // chunk_threads.push(handle);
 
         start_id = end_id + 1;
         if start_id > largest_id {
@@ -496,9 +497,10 @@ where
         );
     }
 
-    for th in chunk_threads {
-        th.join().expect("chunk thread join").expect("chunk thread");
-    }
+    // for th in chunk_threads {
+    //     th.join().expect("chunk thread join").expect("chunk thread");
+    // }
+    t_pool.join();
 
     Ok(())
 }
