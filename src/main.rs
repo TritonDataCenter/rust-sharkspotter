@@ -74,20 +74,19 @@ where
         + std::marker::Send
         + FnMut(SharkspotterMessage) -> Result<(), Error>,
 {
-    // let channel: (Sender<SharkspotterMessage>, Receiver<SharkspotterMessage>) =
-    //     crossbeam_channel::bounded(10);
-    // let obj_tx = channel.0;
-    // let obj_rx = channel.1;
-    // let handle = thread::spawn(move || {
-    //     while let Ok(msg) = obj_rx.recv() {
-    //         on_recv(msg)?;
-    //     }
-    //     Ok(())
-    // });
+    let channel: (Sender<SharkspotterMessage>, Receiver<SharkspotterMessage>) =
+        crossbeam_channel::bounded(10);
+    let obj_tx = channel.0;
+    let obj_rx = channel.1;
+    let handle = thread::spawn(move || {
+        while let Ok(msg) = obj_rx.recv() {
+            on_recv(msg)?;
+        }
+        Ok(())
+    });
 
-    // sharkspotter::run_multithreaded(conf, log, obj_tx)?;
-    // handle.join().expect("sharkspotter reader join")
-    std::unimplemented!();
+    sharkspotter::run_multithreaded(conf, log, obj_tx)?;
+    handle.join().expect("sharkspotter reader join")
 }
 
 fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {

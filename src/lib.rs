@@ -58,14 +58,16 @@ use moray::objects as moray_objects;
 use serde::Deserialize;
 use serde_json::{self, Value};
 use slog::{debug, error, warn, Logger};
-// use std::error::Error as StdError;
+use std::error::Error as StdError;
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
 use std::sync::Arc;
-// use std::thread::{self, JoinHandle};
+use std::thread::{self, JoinHandle};
 use trust_dns_resolver::Resolver;
 
 use threadpool::ThreadPool;
+
+const THREAD_COUNT: u32 = 5;
 
 #[derive(Deserialize, Debug, Clone)]
 struct IdRet {
@@ -405,7 +407,7 @@ where
     F: Fn(&Value, &str, u32) -> Result<(), Error> + Send + Sync + 'static,
 {
     let cueball_opts = ConnectionPoolOptions {
-        max_connections: Some(20),
+        max_connections: Some(THREAD_COUNT),
         claim_timeout: None,
         log: Some(log.clone()),
         rebalancer_action_delay: None, // Default 100ms
@@ -432,7 +434,7 @@ where
     }
 
     // let mut chunk_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
-    let t_pool = ThreadPool::new(20);
+    let t_pool = ThreadPool::new(THREAD_COUNT as usize);
 
     while remaining > 0 {
         let query = chunk_query(id_name, start_id, end_id, conf.chunk_size);
@@ -626,71 +628,85 @@ where
     Ok(())
 }
 
-// /// Same as the regular `run` method, but instead we spawn a new thread per
-// /// shard and send the information back to the caller via a crossbeam
-// /// mpmc channel.
-// pub fn run_multithreaded(
-//     mut conf: config::Config,
-//     log: Logger,
-//     obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
-// ) -> Result<(), Error> {
-//     let mut shard_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
+/// Same as the regular `run` method, but instead we spawn a new thread per
+/// shard and send the information back to the caller via a crossbeam
+/// mpmc channel.
+pub fn run_multithreaded(
+    mut conf: config::Config,
+    log: Logger,
+    obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
+) -> Result<(), Error> {
+    let mut shard_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
 
-//     shark_fix_common(&mut conf, &log);
-//     validate_sharks(&conf, &log)?;
+    shark_fix_common(&mut conf, &log);
+    validate_sharks(&conf, &log)?;
 
-//     for i in conf.min_shard..=conf.max_shard {
-//         let shard_num = i;
-//         let th_log = log.clone();
-//         let th_conf = conf.clone();
-//         let th_obj_tx = obj_tx.clone();
-//         let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
-//             .name(format!("shard_{}", i))
-//             .spawn(move || {
-//                 let moray_host =
-//                     format!("{}.moray.{}", shard_num, th_conf.domain);
-//                 let moray_ip = lookup_ip_str(moray_host.as_str())?;
-//                 let moray_socket = format!("{}:{}", moray_ip, 2021);
+    for i in conf.min_shard..=conf.max_shard {
+        let shard_num = i;
+        let th_log = log.clone();
+        let th_conf = conf.clone();
+        let th_obj_tx = obj_tx.clone();
+        let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
+            .name(format!("shard_{}", i))
+            .spawn(move || {
+                run(
+                    th_conf,
+                    th_log,
+                    move |value: &Value, shark: &str, shard| {
+                        let msg = SharkspotterMessage {
+                            value: value.clone(),
+                            shark: shark.to_string(),
+                            shard,
+                        };
+                        th_obj_tx.send(msg).map_err(|e| {
+                            Error::new(ErrorKind::Other, e.description())
+                        })
+                    },
+                )
+                // let moray_host =
+                //     format!("{}.moray.{}", shard_num, th_conf.domain);
+                // let moray_ip = lookup_ip_str(moray_host.as_str())?;
+                // let moray_socket = format!("{}:{}", moray_ip, 2021);
 
-//                 // TODO: MANTA-4912
-//                 // We can have both _id and _idx, we don't have to have both, but we
-//                 // need at least 1.  This is an error that should be passed back to
-//                 // the caller via the handler as noted in MANTA-4912.
-//                 for id in ["_id", "_idx"].iter() {
-//                     if let Err(e) = iter_ids(
-//                         id,
-//                         &moray_socket,
-//                         &th_conf,
-//                         th_log.clone(),
-//                         i,
-//                         |value: &Value, shark: &str, shard| {
-//                             let msg = SharkspotterMessage {
-//                                 value: value.clone(),
-//                                 shark: shark.to_string(),
-//                                 shard,
-//                             };
-//                             th_obj_tx.send(msg).map_err(|e| {
-//                                 Error::new(ErrorKind::Other, e.description())
-//                             })
-//                         },
-//                     ) {
-//                         error!(
-//                             &th_log,
-//                             "Encountered error scanning shard {} ({})", i, e
-//                         );
-//                     }
-//                 }
-//                 Ok(())
-//             })?;
-//         shard_threads.push(handle);
-//     }
+                // // TODO: MANTA-4912
+                // // We can have both _id and _idx, we don't have to have both, but we
+                // // need at least 1.  This is an error that should be passed back to
+                // // the caller via the handler as noted in MANTA-4912.
+                // for id in ["_id", "_idx"].iter() {
+                //     if let Err(e) = iter_ids(
+                //         id,
+                //         &moray_socket,
+                //         &th_conf,
+                //         th_log.clone(),
+                //         i,
+                //         |value: &Value, shark: &str, shard| {
+                //             let msg = SharkspotterMessage {
+                //                 value: value.clone(),
+                //                 shark: shark.to_string(),
+                //                 shard,
+                //             };
+                //             th_obj_tx.send(msg).map_err(|e| {
+                //                 Error::new(ErrorKind::Other, e.description())
+                //             })
+                //         },
+                //     ) {
+                //         error!(
+                //             &th_log,
+                //             "Encountered error scanning shard {} ({})", i, e
+                //         );
+                //     }
+            })?;
+        // Ok(())
+        // })?;
+        shard_threads.push(handle);
+    }
 
-//     for th in shard_threads {
-//         th.join().expect("shard thread join").expect("shard thread");
-//     }
+    for th in shard_threads {
+        th.join().expect("shard thread join").expect("shard thread");
+    }
 
-//     Ok(())
-// }
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
