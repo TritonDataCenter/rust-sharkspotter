@@ -358,13 +358,14 @@ fn chunk_query(id_name: &str, begin: u64, end: u64, count: u64) -> String {
 //     query: &str,
 //     shard_num: u32,
 //     sharks: &[String],
-//     handler: &mut F,
+//     handler: Arc<F>,
 // ) -> Result<(), Error>
 // where
-//     F: FnMut(&Value, &str, u32) -> Result<(), Error>,
+//     F: Fn(&Value, &str, u32) -> Result<(), Error>,
 // {
-//     match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
-//         query_handler(log, a, shard_num, sharks, handler)
+//     let handler_clone = Arc::clone(&handler);
+//     match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, move |a| {
+//         query_handler(log, a, shard_num, sharks, handler_clone)
 //     }) {
 //         Ok(()) => Ok(()),
 //         Err(e) => {
@@ -412,7 +413,7 @@ where
         log: Some(log.clone()),
         rebalancer_action_delay: None, // Default 100ms
         decoherence_interval: None,    // Default 300s
-        connection_check_interval: None, // Default 30s
+        connection_check_interval: Some(300000), // Default 30s
     };
     let mut mclient =
         MorayClient::from_str(moray_socket, log.clone(), Some(cueball_opts))?;
@@ -438,23 +439,43 @@ where
 
     while remaining > 0 {
         let query = chunk_query(id_name, start_id, end_id, conf.chunk_size);
-        let mut chunk_data: Vec<Value> =
-            Vec::with_capacity(conf.chunk_size.try_into().unwrap());
+        // let mut chunk_data: Vec<Value> =
+        //     Vec::with_capacity(conf.chunk_size.try_into().unwrap());
         let sharks_copy = conf.sharks.clone();
         let log_clone = log.clone();
         let handler_clone = Arc::clone(&handler);
-        let mclient_clone = mclient.clone();
+        let mut mclient_clone = mclient.clone();
 
         // let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
         //     .name(format!("shard_chunk_{}", shard_num))
         //     .spawn(move ||
         t_pool.execute(move || {
-            match read_chunk2(mclient_clone, query.as_str(), &mut chunk_data) {
-                Ok(()) => (),
-                Err(e) => {
-                    warn!(log_clone, "Error occurred reading chunk: {}", e);
-                }
-            };
+            // match read_chunk2(mclient_clone, query.as_str(), &mut chunk_data) {
+            //     Ok(()) => (),
+            //     Err(e) => {
+            //         warn!(log_clone, "Error occurred reading chunk: {}", e);
+            //     }
+            // };
+
+            mclient_clone
+                .sql(&query, vec![], r#"{"timeout": 10000}"#, |a| {
+                    query_handler(
+                        &log_clone,
+                        a,
+                        shard_num,
+                        &sharks_copy,
+                        handler_clone.clone(),
+                    )
+                })
+                .expect("query_handler error"); //  {
+                                                //     Ok(()) => Ok(()),
+                                                //     Err(e) => {
+                                                //         eprintln!("Got error: {}", e);
+                                                //         Err(e)
+                                                //     }
+                                                // }
+
+            debug!(log_clone, "Finished reading chunk: {}", start_id);
 
             // for c in chunk_data {
             //     query_handler(
@@ -466,14 +487,16 @@ where
             //     )
             //     .expect("query_handler returned an error")
             // }
-            run_query_handler(
-                chunk_data,
-                &log_clone,
-                shard_num,
-                &sharks_copy,
-                handler_clone,
-            )
-            .expect("query_handler returned an error");
+            // run_query_handler(
+            //     chunk_data,
+            //     &log_clone,
+            //     shard_num,
+            //     &sharks_copy,
+            //     handler_clone,
+            // )
+            // .expect("query_handler returned an error");
+
+            debug!(log_clone, "Finished query_handler for chunk: {}", start_id);
         });
 
         // chunk_threads.push(handle);
@@ -503,7 +526,9 @@ where
     // for th in chunk_threads {
     //     th.join().expect("chunk thread join").expect("chunk thread");
     // }
+    debug!(&log, "Joining threadpool");
     t_pool.join();
+    debug!(&log, "Done joining threadpool");
 
     Ok(())
 }

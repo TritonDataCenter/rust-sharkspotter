@@ -108,7 +108,7 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
             let fname_clone = fname.clone();
 
             let channel: (Sender<Value>, Receiver<Value>) =
-                crossbeam_channel::bounded(100);
+                crossbeam_channel::bounded(1000);
             let obj_tx = channel.0;
             let obj_rx = channel.1;
             let log_clone = log.clone();
