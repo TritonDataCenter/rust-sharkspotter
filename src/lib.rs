@@ -58,11 +58,11 @@ use moray::objects as moray_objects;
 use serde::Deserialize;
 use serde_json::{self, Value};
 use slog::{debug, error, warn, Logger};
-use std::error::Error as StdError;
+// use std::error::Error as StdError;
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::sync::Arc;
+// use std::thread::{self, JoinHandle};
 use trust_dns_resolver::Resolver;
 
 use threadpool::ThreadPool;
@@ -201,7 +201,7 @@ fn run_query_handler(
     log: &Logger,
     shard_num: u32,
     sharks_requested: &[String],
-    handler: Arc<Mutex<impl FnMut(&Value, &str, u32) -> Result<(), Error>>>,
+    handler: Arc<impl Fn(&Value, &str, u32) -> Result<(), Error>>,
 ) -> Result<(), Error> {
     for c in chunk_data {
         let log_clone = log.clone();
@@ -239,10 +239,10 @@ fn query_handler<F>(
     val: &Value,
     shard_num: u32,
     sharks_requested: &[String],
-    handler: Arc<Mutex<F>>,
+    handler: Arc<F>,
 ) -> Result<(), Error>
 where
-    F: FnMut(&Value, &str, u32) -> Result<(), Error>,
+    F: Fn(&Value, &str, u32) -> Result<(), Error>,
 {
     match val.as_array() {
         Some(v) => {
@@ -327,8 +327,9 @@ where
         if sharks_requested.contains(&s.manta_storage_id) {
             debug!(log, "Calling handler on moray value {}", &moray_value);
             let handler_clone = Arc::clone(&handler);
-            let mut handler_clone = handler_clone.lock().unwrap();
-            let _ = (&mut *handler_clone)(
+            // let mut handler_clone = handler_clone.lock().unwrap();
+            // let _ = (&mut *handler_clone)(
+            let _ = handler_clone(
                 &moray_value,
                 s.manta_storage_id.as_str(),
                 shard_num,
@@ -398,10 +399,10 @@ fn iter_ids<F>(
     conf: &config::Config,
     log: Logger,
     shard_num: u32,
-    handler: Arc<Mutex<F>>,
+    handler: Arc<F>,
 ) -> Result<(), Error>
 where
-    F: FnMut(&Value, &str, u32) -> Result<(), Error> + Send + Sync + 'static,
+    F: Fn(&Value, &str, u32) -> Result<(), Error> + Send + Sync + 'static,
 {
     let cueball_opts = ConnectionPoolOptions {
         max_connections: Some(20),
@@ -430,8 +431,8 @@ where
         end_id = conf.end;
     }
 
-    let mut chunk_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
-    let t_pool = ThreadPool::new(100);
+    // let mut chunk_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
+    let t_pool = ThreadPool::new(20);
 
     while remaining > 0 {
         let query = chunk_query(id_name, start_id, end_id, conf.chunk_size);
@@ -591,12 +592,12 @@ pub fn run<F>(
     handler: F,
 ) -> Result<(), Error>
 where
-    F: FnMut(&Value, &str, u32) -> Result<(), Error> + Send + Sync + 'static,
+    F: Fn(&Value, &str, u32) -> Result<(), Error> + Send + Sync + 'static,
 {
     shark_fix_common(&mut conf, &log);
     validate_sharks(&conf, &log)?;
 
-    let handler_arc = Arc::new(Mutex::new(handler));
+    let handler_arc = Arc::new(handler);
 
     for i in conf.min_shard..=conf.max_shard {
         let moray_host = format!("{}.moray.{}", i, conf.domain);

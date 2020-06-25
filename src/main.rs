@@ -9,8 +9,8 @@
  */
 
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
-use std::io::prelude::*;
+use std::fs::{self, OpenOptions};
+// use std::io::prelude::*;
 /// Run sharkspotter as a commandline tool.
 ///
 /// By default sharkspotter will place the manta object metadata into a file
@@ -181,19 +181,23 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
             // write_mobj_to_file(file, &msg.value, full_object)
         })
     } else {
-        sharkspotter::run(conf, log.clone(), move |moray_obj, shark, shard| {
-            let shark = shark.replace(&domain_prefix, "");
-            debug!(log, "shark: {}, shard: {}", shark, shard);
+        sharkspotter::run(
+            conf,
+            log.clone(),
+            move |moray_obj: &Value, shark: &str, shard| {
+                let shark = shark.replace(&domain_prefix, "");
+                debug!(log, "shark: {}, shard: {}", shark, shard);
 
-            let file_sender =
-                file_map.get(&filename(shark.as_str(), shard)).unwrap();
+                let file_sender =
+                    file_map.get(&filename(shark.as_str(), shard)).unwrap();
 
-            debug!(log, "Sending message to file thread: {}", &moray_obj);
-            file_sender
-                .send(moray_obj.clone())
-                .map_err(|_e| Error::new(ErrorKind::Other, "err"))
-            // write_mobj_to_file(file, moray_obj, full_object)
-        })
+                debug!(log, "Sending message to file thread: {}", &moray_obj);
+                file_sender
+                    .send(moray_obj.clone())
+                    .map_err(|_e| Error::new(ErrorKind::Other, "err"))
+                // write_mobj_to_file(file, moray_obj, full_object)
+            },
+        )
     }
 }
 
