@@ -67,7 +67,7 @@ use trust_dns_resolver::Resolver;
 
 use threadpool::ThreadPool;
 
-const THREAD_COUNT: u32 = 5;
+const THREAD_COUNT: u32 = 10;
 
 #[derive(Deserialize, Debug, Clone)]
 struct IdRet {
@@ -407,19 +407,19 @@ fn iter_ids<F>(
 where
     F: Fn(&Value, &str, u32) -> Result<(), Error> + Send + Sync + 'static,
 {
+    let mut start_id = conf.begin;
+    let mut end_id = conf.begin + conf.chunk_size - 1;
     let cueball_opts = ConnectionPoolOptions {
-        max_connections: Some(THREAD_COUNT),
+        max_connections: Some(1),
         claim_timeout: None,
         log: Some(log.clone()),
         rebalancer_action_delay: None, // Default 100ms
         decoherence_interval: None,    // Default 300s
         connection_check_interval: Some(300000), // Default 30s
     };
+
     let mut mclient =
         MorayClient::from_str(moray_socket, log.clone(), Some(cueball_opts))?;
-
-    let mut start_id = conf.begin;
-    let mut end_id = conf.begin + conf.chunk_size - 1;
     let largest_id = match find_largest_id_value(&log, &mut mclient, id_name) {
         Ok(id) => id,
         Err(e) => {
@@ -443,13 +443,32 @@ where
         //     Vec::with_capacity(conf.chunk_size.try_into().unwrap());
         let sharks_copy = conf.sharks.clone();
         let log_clone = log.clone();
+        let log_clone2 = log.clone();
         let handler_clone = Arc::clone(&handler);
-        let mut mclient_clone = mclient.clone();
+        let moray_socket_clone = String::from(moray_socket).clone();
+
+        // let mut mclient_clone = mclient.clone();
 
         // let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
         //     .name(format!("shard_chunk_{}", shard_num))
         //     .spawn(move ||
         t_pool.execute(move || {
+            let log_clone3 = log_clone2.clone();
+            let cueball_opts = ConnectionPoolOptions {
+                max_connections: Some(1),
+                claim_timeout: None,
+                log: Some(log_clone3),
+                rebalancer_action_delay: None, // Default 100ms
+                decoherence_interval: None,    // Default 300s
+                connection_check_interval: Some(300000), // Default 30s
+            };
+
+            let mut mclient = MorayClient::from_str(
+                moray_socket_clone.as_str(),
+                log_clone2.clone(),
+                Some(cueball_opts),
+            )
+            .expect("failed to create moray client");
             // match read_chunk2(mclient_clone, query.as_str(), &mut chunk_data) {
             //     Ok(()) => (),
             //     Err(e) => {
@@ -457,23 +476,20 @@ where
             //     }
             // };
 
-            mclient_clone
-                .sql(&query, vec![], r#"{"timeout": 10000}"#, |a| {
-                    query_handler(
-                        &log_clone,
-                        a,
-                        shard_num,
-                        &sharks_copy,
-                        handler_clone.clone(),
-                    )
-                })
-                .expect("query_handler error"); //  {
-                                                //     Ok(()) => Ok(()),
-                                                //     Err(e) => {
-                                                //         eprintln!("Got error: {}", e);
-                                                //         Err(e)
-                                                //     }
-                                                // }
+            match mclient.sql(&query, vec![], r#"{"timeout": 10000}"#, |a| {
+                query_handler(
+                    &log_clone,
+                    a,
+                    shard_num,
+                    &sharks_copy,
+                    handler_clone.clone(),
+                )
+            }) {
+                Ok(()) => (),
+                Err(e) => {
+                    warn!(log_clone, "Got error: {}", e);
+                }
+            }
 
             debug!(log_clone, "Finished reading chunk: {}", start_id);
 
@@ -496,7 +512,7 @@ where
             // )
             // .expect("query_handler returned an error");
 
-            debug!(log_clone, "Finished query_handler for chunk: {}", start_id);
+            // debug!(log_clone, "Finished query_haandler for chunk: {}", start_id);
         });
 
         // chunk_threads.push(handle);
