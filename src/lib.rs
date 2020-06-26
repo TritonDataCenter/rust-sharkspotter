@@ -587,7 +587,7 @@ fn validate_sharks(conf: &config::Config, log: &Logger) -> Result<(), Error> {
     let domain = &conf.domain;
     let shard1_moray = format!("1.moray.{}", domain);
     let moray_ip = lookup_ip_str(shard1_moray.as_str())?;
-    let moray_socket = format!("{}:{}", moray_ip, 2021);
+    let moray_socket = format!("{}:{}", moray_ip, 2020);
     let opts = moray_objects::MethodOptions::default();
     let mut mclient =
         MorayClient::from_str(moray_socket.as_str(), log.clone(), None)?;
@@ -645,7 +645,7 @@ where
     for i in conf.min_shard..=conf.max_shard {
         let moray_host = format!("{}.moray.{}", i, conf.domain);
         let moray_ip = lookup_ip_str(moray_host.as_str())?;
-        let moray_socket = format!("{}:{}", moray_ip, 2021);
+        let moray_socket = format!("{}:{}", moray_ip, 2020);
 
         // TODO: MANTA-4912
         // We can have both _id and _idx, we don't have to have both, but we
