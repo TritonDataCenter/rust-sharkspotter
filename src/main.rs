@@ -25,7 +25,7 @@ use slog::{trace, Logger};
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::prelude::*;
-use std::io::Error;
+use std::io::{BufWriter, Error, ErrorKind};
 use std::path::Path;
 use std::process;
 use std::thread;
@@ -33,33 +33,45 @@ use std::thread;
 fn write_mobj_to_file<W>(
     mut writer: W,
     moray_obj: Value,
-    full_object: bool,
+    conf: &Config,
 ) -> Result<(), Error>
 where
     W: Write,
 {
-    let out_obj: Value;
+    let out_bytes: Vec<u8>;
+    let full_object = conf.full_moray_obj;
+    let obj_id_only = conf.obj_id_only;
 
     if !full_object {
-        out_obj = match sharkspotter::manta_obj_from_moray_obj(&moray_obj) {
-            Ok(mo) => mo,
-            Err(e) => {
+        let out_obj = sharkspotter::manta_obj_from_moray_obj(&moray_obj)
+            .map_err(|e| {
                 eprintln!("{}", e);
-                return Ok(());
-            }
+                Error::new(ErrorKind::Other, e)
+            })?;
+
+        if obj_id_only {
+            let obj_id = sharkspotter::object_id_from_manta_obj(&out_obj)
+                .map_err(|e| {
+                    eprintln!("{}", e);
+                    Error::new(ErrorKind::Other, e)
+                })?;
+            out_bytes = obj_id.as_bytes().to_owned();
+        } else {
+            out_bytes = serde_json::to_vec(&out_obj)?;
         }
     } else {
-        out_obj = moray_obj;
+        assert!(!obj_id_only);
+        out_bytes = serde_json::to_vec(&moray_obj)?;
     }
 
-    serde_json::to_writer(&mut writer, &out_obj)?;
+    writer.write_all(&out_bytes)?;
     writer.write_all(b"\n")?;
 
     Ok(())
 }
 
 fn run_multithreaded<F>(
-    conf: Config,
+    conf: &Config,
     log: Logger,
     mut on_recv: F,
 ) -> Result<(), Error>
@@ -85,7 +97,6 @@ where
 
 fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
     let domain_prefix = format!(".{}", conf.domain);
-    let full_object = conf.full_moray_obj;
     let mut file_map = HashMap::new();
     let filename =
         |shark: &str, shard| format!("{}/shard_{}.objs", shark, shard);
@@ -110,11 +121,12 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
                 Ok(file) => file,
             };
 
-            file_map.insert(fname, file);
+            file_map.insert(fname, BufWriter::new(file));
         }
     }
     if conf.multithreaded {
-        run_multithreaded(conf, log.clone(), move |msg| {
+        let closure_conf = conf.clone();
+        run_multithreaded(&conf, log, move |msg| {
             let shark = msg.shark.replace(&domain_prefix, "");
             let shard = msg.shard;
             trace!(&log, "shark: {}, shard: {}", shark, shard);
@@ -126,17 +138,17 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
                 .get_mut(&filename(shark.as_str(), shard))
                 .expect("unexpected shark");
 
-            write_mobj_to_file(file, msg.value, full_object)
+            write_mobj_to_file(file, msg.value, &closure_conf)
         })
     } else {
-        sharkspotter::run(conf, log.clone(), |moray_obj, shark, shard| {
+        sharkspotter::run(&conf, log, |moray_obj, shark, shard| {
             let shark = shark.replace(&domain_prefix, "");
             trace!(&log, "shark: {}, shard: {}", shark, shard);
 
             let file =
                 file_map.get_mut(&filename(shark.as_str(), shard)).unwrap();
 
-            write_mobj_to_file(file, moray_obj, full_object)
+            write_mobj_to_file(file, moray_obj, &conf)
         })
     }
 }
@@ -147,7 +159,6 @@ fn run_with_user_file(
     log: Logger,
 ) -> Result<(), Error> {
     let path = Path::new(filename.as_str());
-    let full_object = conf.full_moray_obj;
     let mut file = match OpenOptions::new().append(true).create(true).open(path)
     {
         Err(e) => {
@@ -157,12 +168,13 @@ fn run_with_user_file(
     };
 
     if conf.multithreaded {
-        run_multithreaded(conf, log, move |msg| {
-            write_mobj_to_file(&mut file, msg.value, full_object)
+        let closure_conf = conf.clone();
+        run_multithreaded(&conf, log, move |msg| {
+            write_mobj_to_file(&mut file, msg.value, &closure_conf)
         })
     } else {
-        sharkspotter::run(conf, log, |moray_obj, _shark, _shard| {
-            write_mobj_to_file(&mut file, moray_obj, full_object)
+        sharkspotter::run(&conf, log, |moray_obj, _shark, _shard| {
+            write_mobj_to_file(&mut file, moray_obj, &conf)
         })
     }
 }

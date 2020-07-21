@@ -201,6 +201,22 @@ pub fn manta_obj_from_moray_obj(moray_obj: &Value) -> Result<Value, String> {
     }
 }
 
+pub fn object_id_from_manta_obj(manta_obj: &Value) -> Result<String, String> {
+    match manta_obj.get("objectId") {
+        Some(obj_id_val) => match obj_id_val.clone().as_str() {
+            Some(o) => Ok(o.to_string()),
+            None => Err(format!(
+                "Could not format objectId ({}) as string",
+                obj_id_val
+            )),
+        },
+        None => Err(format!(
+            "Missing 'objectId' in Manta Object {:#?}",
+            manta_obj
+        )),
+    }
+}
+
 // TODO: add tests for this function
 // See block comment at top of a file for an example of the object this is
 // working with.
@@ -499,13 +515,14 @@ fn validate_sharks(conf: &config::Config, log: &Logger) -> Result<(), Error> {
 /// for a given moray bucket (which is always "manta"), and then querying for
 /// entries in a user configurable chunk size.
 pub fn run<F>(
-    mut conf: config::Config,
+    config: &config::Config,
     log: Logger,
     mut handler: F,
 ) -> Result<(), Error>
 where
     F: FnMut(Value, &str, u32) -> Result<(), Error>,
 {
+    let mut conf = config.clone();
     shark_fix_common(&mut conf, &log);
     validate_sharks(&conf, &log)?;
 
@@ -554,7 +571,6 @@ fn start_iter_ids_thread(
                     shark: shark.to_string(),
                     shard: shard_num,
                 };
-
                 obj_tx
                     .send(msg)
                     .map_err(|e| Error::new(ErrorKind::Other, e.description()))
