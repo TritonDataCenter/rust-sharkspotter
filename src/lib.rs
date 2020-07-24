@@ -58,7 +58,7 @@ use slog::{debug, error, warn, Logger};
 use std::error::Error as StdError;
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
-use std::thread::{self, JoinHandle};
+use threadpool::ThreadPool;
 use trust_dns_resolver::Resolver;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -523,46 +523,40 @@ where
 fn start_iter_ids_thread(
     id_name: &str,
     shard_num: u32,
+    moray_ip: String,
     obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
     log: Logger,
     conf: config::Config,
-) -> Result<JoinHandle<()>, Error> {
-    let moray_host = format!("{}.moray.{}", shard_num, conf.domain);
-    let moray_ip = lookup_ip_str(moray_host.as_str())?;
+) -> impl Fn() -> () {
     let moray_socket = format!("{}:{}", moray_ip, 2020);
     let id_string = id_name.to_string();
 
-    let handle = thread::Builder::new()
-        .name(format!("shard_{}_{}", shard_num, id_string))
-        .spawn(move || {
-            if let Err(e) = iter_ids(
-                id_string.as_str(),
-                &moray_socket,
-                &conf,
-                log.clone(),
-                shard_num,
-                |value, shark, shard_num| {
-                    let msg = SharkspotterMessage {
-                        value,
-                        shark: shark.to_string(),
-                        shard: shard_num,
-                    };
+    move || {
+        if let Err(e) = iter_ids(
+            id_string.as_str(),
+            &moray_socket,
+            &conf,
+            log.clone(),
+            shard_num,
+            |value, shark, shard_num| {
+                let msg = SharkspotterMessage {
+                    value,
+                    shark: shark.to_string(),
+                    shard: shard_num,
+                };
 
-                    obj_tx.send(msg).map_err(|e| {
-                        Error::new(ErrorKind::Other, e.description())
-                    })
-                },
-            ) {
-                error!(
-                    &log,
-                    "Encountered error scanning shard {} ({})", shard_num, e
-                );
-                // TODO panic if this is not an `_idx` or `_id` not found.
-            }
-        })
-        .expect("Join Handle");
-
-    Ok(handle)
+                obj_tx
+                    .send(msg)
+                    .map_err(|e| Error::new(ErrorKind::Other, e.description()))
+            },
+        ) {
+            error!(
+                &log,
+                "Encountered error scanning shard {} ({})", shard_num, e
+            );
+            // TODO panic if this is not an `_idx` or `_id` not found.
+        }
+    }
 }
 
 /// Same as the regular `run` method, but instead we spawn a new thread per
@@ -573,51 +567,39 @@ pub fn run_multithreaded(
     log: Logger,
     obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
 ) -> Result<(), Error> {
-    let mut shard_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
+    if let Err(e) = config::validate_config(&mut conf) {
+        warn!(log, "{}", e);
+    }
+
+    let pool = ThreadPool::with_name("shard_scanner".into(), conf.max_threads);
 
     shark_fix_common(&mut conf, &log);
     validate_sharks(&conf, &log)?;
 
     for i in conf.min_shard..=conf.max_shard {
-        let th_obj_tx = obj_tx.clone();
-        let th_log = log.clone();
-        let th_conf = conf.clone();
+        let moray_host = format!("{}.moray.{}", i, conf.domain);
+        let moray_ip = lookup_ip_str(moray_host.as_str())?;
 
-        let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
-            .name(format!("shard_{}", i))
-            .spawn(move || {
-                let mut id_handles = vec![];
+        // TODO: MANTA-4912
+        // We can have both _id and _idx, we don't have to have both, but we
+        // need at least 1.  This is an error that should be passed back to
+        // the caller via the handler as noted in MANTA-4912.
+        // See also MANTA-5360
 
-                // TODO: MANTA-4912
-                // We can have both _id and _idx, we don't have to have both, but we
-                // need at least 1.  This is an error that should be passed back to
-                // the caller via the handler as noted in MANTA-4912.
-                // See also MANTA-5360
-
-                // Create a thread for both _id and _idx in case we have both.
-                for id in ["_id", "_idx"].iter() {
-                    let handle = start_iter_ids_thread(
-                        id,
-                        i,
-                        th_obj_tx.clone(),
-                        th_log.clone(),
-                        th_conf.clone(),
-                    )?;
-                    id_handles.push(handle);
-                }
-
-                for id_th in id_handles {
-                    id_th.join().expect("id thread");
-                }
-
-                Ok(())
-            })?;
-        shard_threads.push(handle);
+        // Create a thread for both _id and _idx in case we have both.
+        for id in ["_id", "_idx"].iter() {
+            pool.execute(start_iter_ids_thread(
+                id,
+                i,
+                moray_ip.clone(),
+                obj_tx.clone(),
+                log.clone(),
+                conf.clone(),
+            ));
+        }
     }
 
-    for th in shard_threads {
-        th.join().expect("shard thread join").expect("shard thread");
-    }
+    pool.join();
 
     Ok(())
 }

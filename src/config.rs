@@ -11,6 +11,8 @@
 use clap::{value_t, App, AppSettings, Arg, ArgMatches};
 use std::io::Error;
 
+const MAX_THREADS: usize = 100;
+
 #[derive(Clone, Debug)]
 pub struct Config {
     pub min_shard: u32,
@@ -24,6 +26,7 @@ pub struct Config {
     pub output_file: Option<String>,
     pub full_moray_obj: bool,
     pub multithreaded: bool,
+    pub max_threads: usize,
 }
 
 impl Default for Config {
@@ -35,11 +38,12 @@ impl Default for Config {
             sharks: vec![String::from("")],
             begin: 0,
             end: 0,
-            chunk_size: 100,
+            chunk_size: 1000,
             skip_validate_sharks: false,
             output_file: None,
             full_moray_obj: false,
             multithreaded: false,
+            max_threads: 50,
         }
     }
 }
@@ -110,6 +114,12 @@ impl<'a, 'b> Config {
                 .help("Run with multiple threads, one per shard")
                 .long("multithreaded")
                 .takes_value(false))
+            .arg(Arg::with_name("max_threads")
+                .short("t")
+                .help("maximum number of threads to run with")
+                .long("max_threads")
+                .requires("multithreaded")
+                .takes_value(true))
             .arg(Arg::with_name("skip_validate_sharks")
                 .short("x")
                 .help("Skip shark validation. Useful if shark is in readonly \
@@ -123,6 +133,9 @@ impl<'a, 'b> Config {
                 .takes_value(false))
     }
 
+    // TODO: This has grown over time and is now causing a clippy warning.
+    // We should consider using a yaml file to parse the matches.
+    #[allow(clippy::cognitive_complexity)]
     fn config_from_matches(matches: ArgMatches) -> Result<Config, Error> {
         let mut config = Config::default();
 
@@ -162,12 +175,20 @@ impl<'a, 'b> Config {
             config.multithreaded = true;
         }
 
+        if let Ok(max_threads) = value_t!(matches, "max_threads", usize) {
+            config.max_threads = max_threads;
+        }
+
         config.domain = matches.value_of("domain").unwrap().to_string();
         config.sharks = matches
             .values_of("shark")
             .unwrap()
             .map(String::from)
             .collect();
+
+        if let Err(e) = validate_config(&mut config) {
+            eprintln!("{}", e);
+        }
 
         Ok(config)
     }
@@ -176,6 +197,20 @@ impl<'a, 'b> Config {
         let matches = Self::get_app().get_matches();
         Self::config_from_matches(matches)
     }
+}
+
+pub fn validate_config(conf: &mut Config) -> Result<(), String> {
+    let mut ret = Ok(());
+
+    if conf.max_threads > 100 {
+        ret = Err(format!(
+            "Max threads of {} exceeds max.  Setting to {}.",
+            conf.max_threads, MAX_THREADS
+        ));
+        conf.max_threads = MAX_THREADS;
+    }
+
+    ret
 }
 
 #[cfg(test)]
