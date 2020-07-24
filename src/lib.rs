@@ -520,6 +520,51 @@ where
     Ok(())
 }
 
+fn start_iter_ids_thread(
+    id_name: &str,
+    shard_num: u32,
+    obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
+    log: Logger,
+    conf: config::Config,
+) -> Result<JoinHandle<()>, Error> {
+    let moray_host = format!("{}.moray.{}", shard_num, conf.domain);
+    let moray_ip = lookup_ip_str(moray_host.as_str())?;
+    let moray_socket = format!("{}:{}", moray_ip, 2020);
+    let id_string = id_name.to_string();
+
+    let handle = thread::Builder::new()
+        .name(format!("shard_{}_{}", shard_num, id_string))
+        .spawn(move || {
+            if let Err(e) = iter_ids(
+                id_string.as_str(),
+                &moray_socket,
+                &conf,
+                log.clone(),
+                shard_num,
+                |value, shark, shard_num| {
+                    let msg = SharkspotterMessage {
+                        value,
+                        shark: shark.to_string(),
+                        shard: shard_num,
+                    };
+
+                    obj_tx.send(msg).map_err(|e| {
+                        Error::new(ErrorKind::Other, e.description())
+                    })
+                },
+            ) {
+                error!(
+                    &log,
+                    "Encountered error scanning shard {} ({})", shard_num, e
+                );
+                // TODO panic if this is not an `_idx` or `_id` not found.
+            }
+        })
+        .expect("Join Handle");
+
+    Ok(handle)
+}
+
 /// Same as the regular `run` method, but instead we spawn a new thread per
 /// shard and send the information back to the caller via a crossbeam
 /// mpmc channel.
@@ -534,46 +579,37 @@ pub fn run_multithreaded(
     validate_sharks(&conf, &log)?;
 
     for i in conf.min_shard..=conf.max_shard {
-        let shard_num = i;
+        let th_obj_tx = obj_tx.clone();
         let th_log = log.clone();
         let th_conf = conf.clone();
-        let th_obj_tx = obj_tx.clone();
+
         let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
             .name(format!("shard_{}", i))
             .spawn(move || {
-                let moray_host =
-                    format!("{}.moray.{}", shard_num, th_conf.domain);
-                let moray_ip = lookup_ip_str(moray_host.as_str())?;
-                let moray_socket = format!("{}:{}", moray_ip, 2021);
+                let mut id_handles = vec![];
 
                 // TODO: MANTA-4912
                 // We can have both _id and _idx, we don't have to have both, but we
                 // need at least 1.  This is an error that should be passed back to
                 // the caller via the handler as noted in MANTA-4912.
+                // See also MANTA-5360
+
+                // Create a thread for both _id and _idx in case we have both.
                 for id in ["_id", "_idx"].iter() {
-                    if let Err(e) = iter_ids(
+                    let handle = start_iter_ids_thread(
                         id,
-                        &moray_socket,
-                        &th_conf,
-                        th_log.clone(),
                         i,
-                        |value, shark, shard| {
-                            let msg = SharkspotterMessage {
-                                value,
-                                shark: shark.to_string(),
-                                shard,
-                            };
-                            th_obj_tx.send(msg).map_err(|e| {
-                                Error::new(ErrorKind::Other, e.description())
-                            })
-                        },
-                    ) {
-                        error!(
-                            &th_log,
-                            "Encountered error scanning shard {} ({})", i, e
-                        );
-                    }
+                        th_obj_tx.clone(),
+                        th_log.clone(),
+                        th_conf.clone(),
+                    )?;
+                    id_handles.push(handle);
                 }
+
+                for id_th in id_handles {
+                    id_th.join().expect("id thread");
+                }
+
                 Ok(())
             })?;
         shard_threads.push(handle);
