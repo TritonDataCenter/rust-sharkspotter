@@ -395,13 +395,17 @@ where
 
         remaining = largest_id - start_id + 1;
 
+        let percent_complete =
+            format!("{}%", (1 - remaining / largest_id) * 100);
         debug!(
             &log,
-            "shard: {} | start_id: {} | end_id: {} | remaining: {}",
-            shard_num,
-            start_id,
-            end_id,
-            remaining
+            "chunk scanned";
+            "index" => id_name,
+            "shard" => shard_num,
+            "start_id" => start_id,
+            "end_id" => end_id,
+            "remaining_count" => remaining,
+            "percent_complete" => percent_complete
         );
     }
 
