@@ -616,7 +616,8 @@ mod tests {
 
     #[test]
     fn _parse_max_id_value_test() {
-        let log = util::init_plain_logger();
+        let _guard = util::init_global_logger(None);
+        let log = slog_scope::logger();
 
         // not an array
         let num_value_no_arr = json!({

@@ -173,7 +173,9 @@ fn main() -> Result<(), Error> {
         process::exit(1);
     });
 
-    let log = util::init_plain_logger();
+    let _guard = util::init_global_logger(None);
+    let log = slog_scope::logger();
+
     let filename = conf.output_file.clone();
 
     match filename {

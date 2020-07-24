@@ -13,6 +13,7 @@ libmanta = { git = "https://github.com/joyent/rust-libmanta", tag = "v0.7.0" }
 moray = { git = "https://github.com/joyent/rust-moray", tag="v0.9.3" }
 slog = "2.5.2"
 slog-bunyan = "2.2.0"
+slog-scope = "4.1.2"
 trust-dns-resolver = "0.11.1"
 slog-term = "2.4.1"
 
