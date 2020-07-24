@@ -21,7 +21,7 @@ use crossbeam_channel::{self, Receiver, Sender};
 use serde_json::Value;
 use sharkspotter::config::Config;
 use sharkspotter::{util, SharkspotterMessage};
-use slog::Logger;
+use slog::{trace, Logger};
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::prelude::*;
@@ -114,10 +114,10 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
         }
     }
     if conf.multithreaded {
-        run_multithreaded(conf, log, move |msg| {
+        run_multithreaded(conf, log.clone(), move |msg| {
             let shark = msg.shark.replace(&domain_prefix, "");
             let shard = msg.shard;
-            println!("shark: {}, shard: {}", shark, shard);
+            trace!(&log, "shark: {}, shard: {}", shark, shard);
 
             // Only sharks that are in the config.sharks vector should be
             // passed to the callback.  If we see a shark that wasn't
@@ -129,9 +129,9 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
             write_mobj_to_file(file, msg.value, full_object)
         })
     } else {
-        sharkspotter::run(conf, log, |moray_obj, shark, shard| {
+        sharkspotter::run(conf, log.clone(), |moray_obj, shark, shard| {
             let shark = shark.replace(&domain_prefix, "");
-            println!("shark: {}, shard: {}", shark, shard);
+            trace!(&log, "shark: {}, shard: {}", shark, shard);
 
             let file =
                 file_map.get_mut(&filename(shark.as_str(), shard)).unwrap();
