@@ -395,8 +395,11 @@ where
 
         remaining = largest_id - start_id + 1;
 
+        // Find the percent value rounded to the thousand-th of a percent.
         let percent_complete =
-            format!("{}%", (1 - remaining / largest_id) * 100);
+            (1.0 - remaining as f64 / largest_id as f64) * 100.0;
+        let percent_complete = (percent_complete * 1000.0).round() / 1000.0;
+
         debug!(
             &log,
             "chunk scanned";

@@ -8,11 +8,10 @@
  * Copyright 2020 Joyent, Inc.
  */
 
+use clap::{crate_name, crate_version};
 use slog::{o, Drain, Level, LevelFilter, Logger};
 use std::io;
 use std::sync::Mutex;
-use clap::{crate_name, crate_version};
-
 
 fn create_bunyan_logger<W>(io: W, level: Level) -> Logger
 where
