@@ -202,7 +202,7 @@ impl<'a, 'b> Config {
 pub fn validate_config(conf: &mut Config) -> Result<(), String> {
     let mut ret = Ok(());
 
-    if conf.max_threads > 100 {
+    if conf.max_threads > MAX_THREADS {
         ret = Err(format!(
             "Max threads of {} exceeds max.  Setting to {}.",
             conf.max_threads, MAX_THREADS
