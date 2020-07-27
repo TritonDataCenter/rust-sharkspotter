@@ -589,10 +589,11 @@ fn start_iter_ids_thread(
 /// shard and send the information back to the caller via a crossbeam
 /// mpmc channel.
 pub fn run_multithreaded(
-    mut conf: config::Config,
+    config: &config::Config,
     log: Logger,
     obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
 ) -> Result<(), Error> {
+    let mut conf = config.clone();
     if let Err(e) = config::validate_config(&mut conf) {
         warn!(log, "{}", e);
     }

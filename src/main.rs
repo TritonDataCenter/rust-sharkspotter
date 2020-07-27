@@ -126,7 +126,7 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
     }
     if conf.multithreaded {
         let closure_conf = conf.clone();
-        run_multithreaded(&conf, log, move |msg| {
+        run_multithreaded(&conf, log.clone(), move |msg| {
             let shark = msg.shark.replace(&domain_prefix, "");
             let shard = msg.shard;
             trace!(&log, "shark: {}, shard: {}", shark, shard);
@@ -141,7 +141,7 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
             write_mobj_to_file(file, msg.value, &closure_conf)
         })
     } else {
-        sharkspotter::run(&conf, log, |moray_obj, shark, shard| {
+        sharkspotter::run(&conf, log.clone(), |moray_obj, shark, shard| {
             let shark = shark.replace(&domain_prefix, "");
             trace!(&log, "shark: {}, shard: {}", shark, shard);
 
