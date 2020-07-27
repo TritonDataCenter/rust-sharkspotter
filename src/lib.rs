@@ -365,6 +365,8 @@ where
 
     let mut remaining = largest_id - conf.begin + 1;
 
+    assert!(largest_id >= remaining);
+
     if end_id > conf.end {
         end_id = conf.end;
     }
@@ -394,6 +396,7 @@ where
         }
 
         remaining = largest_id - start_id + 1;
+        assert!(largest_id >= remaining);
 
         // Find the percent value rounded to the thousand-th of a percent.
         let percent_complete =
@@ -561,7 +564,7 @@ fn start_iter_ids_thread(
                 &log,
                 "Encountered error scanning shard {} ({})", shard_num, e
             );
-            // TODO panic if this is not an `_idx` or `_id` not found.
+            // TODO: MANTA-5360
         }
     }
 }
