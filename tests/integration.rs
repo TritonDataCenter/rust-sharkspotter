@@ -30,14 +30,15 @@ FLAGS:
     -V, --version          Prints version information
 
 OPTIONS:
-    -b, --begin <INDEX>               index to being scanning at (default: 0)
-    -c, --chunk-size <NUM_RECORDS>    number of records to scan per call to moray (default: 100)
-    -d, --domain <MORAY_DOMAIN>       Domain that the moray zones are in
-    -e, --end <INDEX>                 index to stop scanning at (default: 0)
-    -M, --max_shard <MAX_SHARD>       Ending shard number (default: 1)
-    -m, --min_shard <MIN_SHARD>       Beginning shard number (default: 1)
-    -f, --file <FILE_NAME>            output filename (default <shark>/shard_<shard_num>.objs
-    -s, --shark <STORAGE_ID>...       Find objects that belong to this shark
+    -b, --begin <INDEX>                index to being scanning at (default: 0)
+    -c, --chunk-size <NUM_RECORDS>     number of records to scan per call to moray (default: 100)
+    -d, --domain <MORAY_DOMAIN>        Domain that the moray zones are in
+    -e, --end <INDEX>                  index to stop scanning at (default: 0)
+    -M, --max_shard <MAX_SHARD>        Ending shard number (default: 1)
+    -t, --max_threads <max_threads>    maximum number of threads to run with
+    -m, --min_shard <MIN_SHARD>        Beginning shard number (default: 1)
+    -f, --file <FILE_NAME>             output filename (default <shark>/shard_<shard_num>.objs
+    -s, --shark <STORAGE_ID>...        Find objects that belong to this shark
 ", env!("CARGO_PKG_VERSION"));
 
         assert_cli::Assert::main_binary()

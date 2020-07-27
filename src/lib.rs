@@ -58,7 +58,7 @@ use slog::{debug, error, warn, Logger};
 use std::error::Error as StdError;
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
-use std::thread::{self, JoinHandle};
+use threadpool::ThreadPool;
 use trust_dns_resolver::Resolver;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -365,6 +365,8 @@ where
 
     let mut remaining = largest_id - conf.begin + 1;
 
+    assert!(largest_id >= remaining);
+
     if end_id > conf.end {
         end_id = conf.end;
     }
@@ -394,14 +396,22 @@ where
         }
 
         remaining = largest_id - start_id + 1;
+        assert!(largest_id >= remaining);
+
+        // Find the percent value rounded to the thousand-th of a percent.
+        let percent_complete =
+            (1.0 - remaining as f64 / largest_id as f64) * 100.0;
+        let percent_complete = (percent_complete * 1000.0).round() / 1000.0;
 
         debug!(
             &log,
-            "shard: {} | start_id: {} | end_id: {} | remaining: {}",
-            shard_num,
-            start_id,
-            end_id,
-            remaining
+            "chunk scanned";
+            "index" => id_name,
+            "shard" => shard_num,
+            "start_id" => start_id,
+            "end_id" => end_id,
+            "remaining_count" => remaining,
+            "percent_complete" => percent_complete
         );
     }
 
@@ -520,6 +530,45 @@ where
     Ok(())
 }
 
+fn start_iter_ids_thread(
+    id_name: &str,
+    shard_num: u32,
+    moray_ip: String,
+    obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
+    log: Logger,
+    conf: config::Config,
+) -> impl Fn() -> () {
+    let moray_socket = format!("{}:{}", moray_ip, 2020);
+    let id_string = id_name.to_string();
+
+    move || {
+        if let Err(e) = iter_ids(
+            id_string.as_str(),
+            &moray_socket,
+            &conf,
+            log.clone(),
+            shard_num,
+            |value, shark, shard_num| {
+                let msg = SharkspotterMessage {
+                    value,
+                    shark: shark.to_string(),
+                    shard: shard_num,
+                };
+
+                obj_tx
+                    .send(msg)
+                    .map_err(|e| Error::new(ErrorKind::Other, e.description()))
+            },
+        ) {
+            error!(
+                &log,
+                "Encountered error scanning shard {} ({})", shard_num, e
+            );
+            // TODO: MANTA-5360
+        }
+    }
+}
+
 /// Same as the regular `run` method, but instead we spawn a new thread per
 /// shard and send the information back to the caller via a crossbeam
 /// mpmc channel.
@@ -528,60 +577,39 @@ pub fn run_multithreaded(
     log: Logger,
     obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
 ) -> Result<(), Error> {
-    let mut shard_threads: Vec<JoinHandle<Result<(), Error>>> = vec![];
+    if let Err(e) = config::validate_config(&mut conf) {
+        warn!(log, "{}", e);
+    }
+
+    let pool = ThreadPool::with_name("shard_scanner".into(), conf.max_threads);
 
     shark_fix_common(&mut conf, &log);
     validate_sharks(&conf, &log)?;
 
     for i in conf.min_shard..=conf.max_shard {
-        let shard_num = i;
-        let th_log = log.clone();
-        let th_conf = conf.clone();
-        let th_obj_tx = obj_tx.clone();
-        let handle: JoinHandle<Result<(), Error>> = thread::Builder::new()
-            .name(format!("shard_{}", i))
-            .spawn(move || {
-                let moray_host =
-                    format!("{}.moray.{}", shard_num, th_conf.domain);
-                let moray_ip = lookup_ip_str(moray_host.as_str())?;
-                let moray_socket = format!("{}:{}", moray_ip, 2021);
+        let moray_host = format!("{}.moray.{}", i, conf.domain);
+        let moray_ip = lookup_ip_str(moray_host.as_str())?;
 
-                // TODO: MANTA-4912
-                // We can have both _id and _idx, we don't have to have both, but we
-                // need at least 1.  This is an error that should be passed back to
-                // the caller via the handler as noted in MANTA-4912.
-                for id in ["_id", "_idx"].iter() {
-                    if let Err(e) = iter_ids(
-                        id,
-                        &moray_socket,
-                        &th_conf,
-                        th_log.clone(),
-                        i,
-                        |value, shark, shard| {
-                            let msg = SharkspotterMessage {
-                                value,
-                                shark: shark.to_string(),
-                                shard,
-                            };
-                            th_obj_tx.send(msg).map_err(|e| {
-                                Error::new(ErrorKind::Other, e.description())
-                            })
-                        },
-                    ) {
-                        error!(
-                            &th_log,
-                            "Encountered error scanning shard {} ({})", i, e
-                        );
-                    }
-                }
-                Ok(())
-            })?;
-        shard_threads.push(handle);
+        // TODO: MANTA-4912
+        // We can have both _id and _idx, we don't have to have both, but we
+        // need at least 1.  This is an error that should be passed back to
+        // the caller via the handler as noted in MANTA-4912.
+        // See also MANTA-5360
+
+        // Create a thread for both _id and _idx in case we have both.
+        for id in ["_id", "_idx"].iter() {
+            pool.execute(start_iter_ids_thread(
+                id,
+                i,
+                moray_ip.clone(),
+                obj_tx.clone(),
+                log.clone(),
+                conf.clone(),
+            ));
+        }
     }
 
-    for th in shard_threads {
-        th.join().expect("shard thread join").expect("shard thread");
-    }
+    pool.join();
 
     Ok(())
 }
@@ -594,7 +622,8 @@ mod tests {
 
     #[test]
     fn _parse_max_id_value_test() {
-        let log = util::init_plain_logger();
+        let _guard = util::init_global_logger(None);
+        let log = slog_scope::logger();
 
         // not an array
         let num_value_no_arr = json!({
