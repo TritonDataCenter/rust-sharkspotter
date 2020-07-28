@@ -202,19 +202,17 @@ pub fn manta_obj_from_moray_obj(moray_obj: &Value) -> Result<Value, String> {
 }
 
 pub fn object_id_from_manta_obj(manta_obj: &Value) -> Result<String, String> {
-    match manta_obj.get("objectId") {
-        Some(obj_id_val) => match obj_id_val.clone().as_str() {
-            Some(o) => Ok(o.to_string()),
-            None => Err(format!(
-                "Could not format objectId ({}) as string",
-                obj_id_val
-            )),
-        },
-        None => Err(format!(
-            "Missing 'objectId' in Manta Object {:#?}",
-            manta_obj
-        )),
-    }
+    manta_obj
+        .get("objectId")
+        .ok_or_else(|| {
+            format!("Missing 'objectId' in Manta Object {:#?}", manta_obj)
+        })
+        .and_then(|obj_id_val| {
+            obj_id_val.as_str().ok_or_else(|| {
+                format!("Could not format objectId ({}) as string", obj_id_val)
+            })
+        })
+        .and_then(|o| Ok(o.to_string()))
 }
 
 // TODO: add tests for this function
