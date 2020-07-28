@@ -201,6 +201,20 @@ pub fn manta_obj_from_moray_obj(moray_obj: &Value) -> Result<Value, String> {
     }
 }
 
+pub fn object_id_from_manta_obj(manta_obj: &Value) -> Result<String, String> {
+    manta_obj
+        .get("objectId")
+        .ok_or_else(|| {
+            format!("Missing 'objectId' in Manta Object {:#?}", manta_obj)
+        })
+        .and_then(|obj_id_val| {
+            obj_id_val.as_str().ok_or_else(|| {
+                format!("Could not format objectId ({}) as string", obj_id_val)
+            })
+        })
+        .and_then(|o| Ok(o.to_string()))
+}
+
 // TODO: add tests for this function
 // See block comment at top of a file for an example of the object this is
 // working with.
@@ -364,8 +378,7 @@ where
     };
 
     let mut remaining = largest_id - conf.begin + 1;
-
-    assert!(largest_id >= remaining);
+    assert!(largest_id + 1 >= remaining);
 
     if end_id > conf.end {
         end_id = conf.end;
@@ -396,7 +409,7 @@ where
         }
 
         remaining = largest_id - start_id + 1;
-        assert!(largest_id >= remaining);
+        assert!(largest_id + 1 >= remaining);
 
         // Find the percent value rounded to the thousand-th of a percent.
         let percent_complete =
@@ -499,13 +512,14 @@ fn validate_sharks(conf: &config::Config, log: &Logger) -> Result<(), Error> {
 /// for a given moray bucket (which is always "manta"), and then querying for
 /// entries in a user configurable chunk size.
 pub fn run<F>(
-    mut conf: config::Config,
+    config: &config::Config,
     log: Logger,
     mut handler: F,
 ) -> Result<(), Error>
 where
     F: FnMut(Value, &str, u32) -> Result<(), Error>,
 {
+    let mut conf = config.clone();
     shark_fix_common(&mut conf, &log);
     validate_sharks(&conf, &log)?;
 
@@ -554,7 +568,6 @@ fn start_iter_ids_thread(
                     shark: shark.to_string(),
                     shard: shard_num,
                 };
-
                 obj_tx
                     .send(msg)
                     .map_err(|e| Error::new(ErrorKind::Other, e.description()))
@@ -573,10 +586,11 @@ fn start_iter_ids_thread(
 /// shard and send the information back to the caller via a crossbeam
 /// mpmc channel.
 pub fn run_multithreaded(
-    mut conf: config::Config,
+    config: &config::Config,
     log: Logger,
     obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
 ) -> Result<(), Error> {
+    let mut conf = config.clone();
     if let Err(e) = config::validate_config(&mut conf) {
         warn!(log, "{}", e);
     }

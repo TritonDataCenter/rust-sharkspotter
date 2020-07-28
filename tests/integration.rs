@@ -23,11 +23,12 @@ USAGE:
     sharkspotter [FLAGS] [OPTIONS] --domain <MORAY_DOMAIN> --shark <STORAGE_ID>...
 
 FLAGS:
-    -F, --full_object      Write full moray objects to file instead of just the manta objects.
-    -h, --help             Prints help information
-    -T, --multithreaded    Run with multiple threads, one per shard
-    -x                     Skip shark validation. Useful if shark is in readonly mode.
-    -V, --version          Prints version information
+    -F, --full_object       Write full moray objects to file instead of just the manta objects.
+    -h, --help              Prints help information
+    -T, --multithreaded     Run with multiple threads, one per shard
+    -O, --object_id_only    Output only the object ID
+    -x                      Skip shark validation. Useful if shark is in readonly mode.
+    -V, --version           Prints version information
 
 OPTIONS:
     -b, --begin <INDEX>                index to being scanning at (default: 0)

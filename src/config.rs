@@ -25,6 +25,7 @@ pub struct Config {
     pub skip_validate_sharks: bool,
     pub output_file: Option<String>,
     pub full_moray_obj: bool,
+    pub obj_id_only: bool,
     pub multithreaded: bool,
     pub max_threads: usize,
 }
@@ -42,6 +43,7 @@ impl Default for Config {
             skip_validate_sharks: false,
             output_file: None,
             full_moray_obj: false,
+            obj_id_only: false,
             multithreaded: false,
             max_threads: 50,
         }
@@ -131,6 +133,12 @@ impl<'a, 'b> Config {
                 .help("Write full moray objects to file instead of just the \
                 manta objects.")
                 .takes_value(false))
+            .arg(Arg::with_name("obj_id_only")
+                .short("O")
+                .long("object_id_only")
+                .help("Output only the object ID")
+                .conflicts_with("full_moray_object")
+                .takes_value(false))
     }
 
     // TODO: This has grown over time and is now causing a clippy warning.
@@ -169,6 +177,10 @@ impl<'a, 'b> Config {
 
         if matches.is_present("full_moray_object") {
             config.full_moray_obj = true;
+        }
+
+        if matches.is_present("obj_id_only") {
+            config.obj_id_only = true;
         }
 
         if matches.is_present("multithreaded") {
