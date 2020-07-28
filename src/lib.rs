@@ -378,8 +378,7 @@ where
     };
 
     let mut remaining = largest_id - conf.begin + 1;
-
-    assert!(largest_id >= remaining);
+    assert!(largest_id + 1 >= remaining);
 
     if end_id > conf.end {
         end_id = conf.end;
@@ -410,7 +409,7 @@ where
         }
 
         remaining = largest_id - start_id + 1;
-        assert!(largest_id >= remaining);
+        assert!(largest_id + 1 >= remaining);
 
         // Find the percent value rounded to the thousand-th of a percent.
         let percent_complete =
