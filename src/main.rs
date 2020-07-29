@@ -185,7 +185,7 @@ fn main() -> Result<(), Error> {
         process::exit(1);
     });
 
-    let _guard = util::init_global_logger(None);
+    let _guard = util::init_global_logger(Some(conf.log_level));
     let log = slog_scope::logger();
 
     let filename = conf.output_file.clone();

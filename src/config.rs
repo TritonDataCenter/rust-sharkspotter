@@ -9,7 +9,9 @@
  */
 
 use clap::{value_t, App, AppSettings, Arg, ArgMatches};
-use std::io::Error;
+use slog::Level;
+use std::io::{Error, ErrorKind};
+use std::str::FromStr;
 
 const MAX_THREADS: usize = 100;
 
@@ -28,6 +30,7 @@ pub struct Config {
     pub obj_id_only: bool,
     pub multithreaded: bool,
     pub max_threads: usize,
+    pub log_level: Level,
 }
 
 impl Default for Config {
@@ -46,8 +49,26 @@ impl Default for Config {
             obj_id_only: false,
             multithreaded: false,
             max_threads: 50,
+            log_level: Level::Debug,
         }
     }
+}
+
+fn parse_log_level(matches: &ArgMatches) -> Result<Level, Error> {
+    let level = match value_t!(matches, "log_level", String) {
+        Ok(l) => l,
+        Err(e) => {
+            let msg = format!("Could not parse 'log_level': {}", e);
+            eprintln!("{}", msg);
+            return Err(Error::new(ErrorKind::Other, msg));
+        }
+    };
+
+    Level::from_str(&level).map_err(|_| {
+        let msg = format!("Could not parse {} as 'log_level'", level);
+        eprintln!("{}", msg);
+        Error::new(ErrorKind::Other, msg)
+    })
 }
 
 impl<'a, 'b> Config {
@@ -139,6 +160,11 @@ impl<'a, 'b> Config {
                 .help("Output only the object ID")
                 .conflicts_with("full_moray_object")
                 .takes_value(false))
+            .arg(Arg::with_name("log_level")
+                .short("l")
+                .long("log_level")
+                .help("Set log level")
+                .takes_value(true))
     }
 
     // TODO: This has grown over time and is now causing a clippy warning.
@@ -189,6 +215,10 @@ impl<'a, 'b> Config {
 
         if let Ok(max_threads) = value_t!(matches, "max_threads", usize) {
             config.max_threads = max_threads;
+        }
+
+        if matches.is_present("log_level") {
+            config.log_level = parse_log_level(&matches)?;
         }
 
         config.domain = matches.value_of("domain").unwrap().to_string();
