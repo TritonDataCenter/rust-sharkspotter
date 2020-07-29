@@ -35,6 +35,7 @@ OPTIONS:
     -c, --chunk-size <NUM_RECORDS>     number of records to scan per call to moray (default: 100)
     -d, --domain <MORAY_DOMAIN>        Domain that the moray zones are in
     -e, --end <INDEX>                  index to stop scanning at (default: 0)
+    -l, --log_level <log_level>        Set log level
     -M, --max_shard <MAX_SHARD>        Ending shard number (default: 1)
     -t, --max_threads <max_threads>    maximum number of threads to run with
     -m, --min_shard <MIN_SHARD>        Beginning shard number (default: 1)
