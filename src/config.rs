@@ -65,7 +65,7 @@ fn parse_log_level(matches: &ArgMatches) -> Result<Level, Error> {
     };
 
     Level::from_str(&level).map_err(|_| {
-        let msg = format!("Could not parse {} as 'log_level'", level);
+        let msg = format!("Could not parse '{}' as a log_level", level);
         eprintln!("{}", msg);
         Error::new(ErrorKind::Other, msg)
     })
