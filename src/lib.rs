@@ -49,13 +49,13 @@
 pub mod config;
 pub mod util;
 
+use backoff::{ExponentialBackoff, Operation};
 use libmanta::moray::MantaObjectShark;
 use moray::client::MorayClient;
 use moray::objects as moray_objects;
 use serde::Deserialize;
 use serde_json::{self, Value};
 use slog::{debug, error, warn, Logger};
-use std::error::Error as StdError;
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
 use threadpool::ThreadPool;
@@ -533,11 +533,20 @@ where
         // need at least 1.  This is an error that should be passed back to
         // the caller via the handler as noted in MANTA-4912.
         for id in ["_id", "_idx"].iter() {
-            if let Err(e) =
+            let mut scan_backoff = ExponentialBackoff::default();
+            let mut scan_op = || {
+                debug!(log, "attempting iter_ids with retry...");
                 iter_ids(id, &moray_socket, &conf, log.clone(), i, &mut handler)
-            {
-                error!(&log, "Encountered error scanning shard {} ({})", i, e);
-            }
+                .map_err(|e| {
+                    error!(
+                        &log,
+                        "Encountered error scanning shard {} ({})",
+                            i, e
+                        );
+                    })?;
+                    Ok(())
+            };
+            scan_op.retry(&mut scan_backoff).expect("Could not retry scan operation");
         }
     }
 
@@ -570,7 +579,7 @@ fn start_iter_ids_thread(
                 };
                 obj_tx
                     .send(msg)
-                    .map_err(|e| Error::new(ErrorKind::Other, e.description()))
+                    .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
             },
         ) {
             error!(
