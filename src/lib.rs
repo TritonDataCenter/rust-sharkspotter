@@ -59,11 +59,13 @@ use serde_json::{self, Value};
 use slog::{debug, error, warn, Logger};
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
 use trust_dns_resolver::Resolver;
 
 const EXP_BACKOFF_INIT_DELAY_MILLIS: u64 = 20;
 const EXP_BACKOFF_RETRY_COUNT: usize = 10;
+
 #[derive(Deserialize, Debug, Clone)]
 struct IdRet {
     max: String,
@@ -616,6 +618,9 @@ pub fn run_multithreaded(
     shark_fix_common(&mut conf, &log);
     validate_sharks(&conf, &log)?;
 
+    let per_thread_status = vec![];
+    let th_status = Arc::new(Mutex::new(per_thread_status));
+
     for i in conf.min_shard..=conf.max_shard {
         let moray_host = format!("{}.moray.{}", i, conf.domain);
         let moray_ip = lookup_ip_str(moray_host.as_str())?;
@@ -628,19 +633,22 @@ pub fn run_multithreaded(
 
         // Create a thread for both _id and _idx in case we have both.
         for id in ["_id", "_idx"].iter() {
-            pool.execute(start_iter_ids_thread(
-                id,
-                i,
-                moray_ip.clone(),
-                obj_tx.clone(),
-                log.clone(),
-                conf.clone(),
-            ));
+            let moray_ip = moray_ip.clone();
+            let obj_tx = obj_tx.clone();
+            let log = log.clone();
+            let conf = conf.clone();
+            let ts = Arc::clone(&th_status);
+            pool.execute(move || {
+                let result =
+                    start_iter_ids_thread(id, i, moray_ip, obj_tx, log, conf);
+                ts.lock().unwrap().push(result);
+            });
         }
     }
 
     pool.join();
 
+    println!("Thread result count: {}", th_status.lock().unwrap().len());
     Ok(())
 }
 
