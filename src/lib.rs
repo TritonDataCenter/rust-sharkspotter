@@ -52,14 +52,19 @@ pub mod util;
 use libmanta::moray::MantaObjectShark;
 use moray::client::MorayClient;
 use moray::objects as moray_objects;
+use retry::delay::{jitter, Exponential};
+use retry::retry;
 use serde::Deserialize;
 use serde_json::{self, Value};
 use slog::{debug, error, warn, Logger};
-use std::error::Error as StdError;
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
 use trust_dns_resolver::Resolver;
+
+const EXP_BACKOFF_INIT_DELAY_MILLIS: u64 = 20;
+const EXP_BACKOFF_RETRY_COUNT: usize = 10;
 
 #[derive(Deserialize, Debug, Clone)]
 struct IdRet {
@@ -141,27 +146,34 @@ fn find_largest_id_value(
 ) -> Result<u64, Error> {
     let mut ret: u64 = 0;
     debug!(log, "Finding largest ID value as '{}'", id);
-    mclient.sql(
-        format!("SELECT MAX({}) FROM manta;", id).as_str(),
-        vec![],
-        r#"{"limit": 1, "no_count": true}"#,
-        |resp| {
-            // The expected response is:
-            //  [{
-            //      "max": <value>
-            //  }]
-            //
-            //  Where <value> is either a String or a Number.
+    let _result = retry(
+        Exponential::from_millis(EXP_BACKOFF_INIT_DELAY_MILLIS)
+            .map(jitter)
+            .take(EXP_BACKOFF_RETRY_COUNT),
+        || {
+            mclient.sql(
+                format!("SELECT MAX({}) FROM manta;", id).as_str(),
+                vec![],
+                r#"{"limit": 1, "no_count": true}"#,
+                |resp| {
+                    // The expected response is:
+                    //  [{
+                    //      "max": <value>
+                    //  }]
+                    //
+                    //  Where <value> is either a String or a Number.
 
-            ret = match _parse_max_id_value(resp.to_owned(), log) {
-                Ok(max_num) => max_num,
-                Err(e) => {
-                    return Err(e);
-                }
-            };
-            Ok(())
+                    ret = match _parse_max_id_value(resp.to_owned(), log) {
+                        Ok(max_num) => max_num,
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    };
+                    Ok(())
+                },
+            )
         },
-    )?;
+    );
     Ok(ret)
 }
 
@@ -341,15 +353,21 @@ fn read_chunk<F>(
 where
     F: FnMut(Value, &str, u32) -> Result<(), Error>,
 {
-    match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
-        query_handler(log, a, shard_num, sharks, handler)
-    }) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            eprintln!("Got error: {}", e);
-            Err(e)
-        }
-    }
+    let _result = retry(
+        Exponential::from_millis(EXP_BACKOFF_INIT_DELAY_MILLIS)
+            .map(jitter)
+            .take(EXP_BACKOFF_RETRY_COUNT),
+        || match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
+            query_handler(log, a, shard_num, sharks, handler)
+        }) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                eprintln!("Got error: {}", e);
+                Err(e)
+            }
+        },
+    );
+    Ok(())
 }
 
 /// Find the maximum _id/_idx and, starting at 0 iterate over every entry up
@@ -570,7 +588,7 @@ fn start_iter_ids_thread(
                 };
                 obj_tx
                     .send(msg)
-                    .map_err(|e| Error::new(ErrorKind::Other, e.description()))
+                    .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
             },
         ) {
             error!(
@@ -600,6 +618,9 @@ pub fn run_multithreaded(
     shark_fix_common(&mut conf, &log);
     validate_sharks(&conf, &log)?;
 
+    let per_thread_status = vec![];
+    let th_status = Arc::new(Mutex::new(per_thread_status));
+
     for i in conf.min_shard..=conf.max_shard {
         let moray_host = format!("{}.moray.{}", i, conf.domain);
         let moray_ip = lookup_ip_str(moray_host.as_str())?;
@@ -612,19 +633,22 @@ pub fn run_multithreaded(
 
         // Create a thread for both _id and _idx in case we have both.
         for id in ["_id", "_idx"].iter() {
-            pool.execute(start_iter_ids_thread(
-                id,
-                i,
-                moray_ip.clone(),
-                obj_tx.clone(),
-                log.clone(),
-                conf.clone(),
-            ));
+            let moray_ip = moray_ip.clone();
+            let obj_tx = obj_tx.clone();
+            let log = log.clone();
+            let conf = conf.clone();
+            let ts = Arc::clone(&th_status);
+            pool.execute(move || {
+                let result =
+                    start_iter_ids_thread(id, i, moray_ip, obj_tx, log, conf);
+                ts.lock().unwrap().push(result);
+            });
         }
     }
 
     pool.join();
 
+    println!("Thread result count: {}", th_status.lock().unwrap().len());
     Ok(())
 }
 
