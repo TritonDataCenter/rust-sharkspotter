@@ -49,10 +49,11 @@
 pub mod config;
 pub mod util;
 
-use backoff::{ExponentialBackoff, Operation};
 use libmanta::moray::MantaObjectShark;
 use moray::client::MorayClient;
 use moray::objects as moray_objects;
+use retry::delay::{jitter, Exponential};
+use retry::retry;
 use serde::Deserialize;
 use serde_json::{self, Value};
 use slog::{debug, error, warn, Logger};
@@ -61,6 +62,8 @@ use std::net::IpAddr;
 use threadpool::ThreadPool;
 use trust_dns_resolver::Resolver;
 
+const EXP_BACKOFF_INIT_DELAY_MILLIS: u64 = 20;
+const EXP_BACKOFF_RETRY_COUNT: usize = 10;
 #[derive(Deserialize, Debug, Clone)]
 struct IdRet {
     max: String,
@@ -141,27 +144,34 @@ fn find_largest_id_value(
 ) -> Result<u64, Error> {
     let mut ret: u64 = 0;
     debug!(log, "Finding largest ID value as '{}'", id);
-    mclient.sql(
-        format!("SELECT MAX({}) FROM manta;", id).as_str(),
-        vec![],
-        r#"{"limit": 1, "no_count": true}"#,
-        |resp| {
-            // The expected response is:
-            //  [{
-            //      "max": <value>
-            //  }]
-            //
-            //  Where <value> is either a String or a Number.
+    let _result = retry(
+        Exponential::from_millis(EXP_BACKOFF_INIT_DELAY_MILLIS)
+            .map(jitter)
+            .take(EXP_BACKOFF_RETRY_COUNT),
+        || {
+            mclient.sql(
+                format!("SELECT MAX({}) FROM manta;", id).as_str(),
+                vec![],
+                r#"{"limit": 1, "no_count": true}"#,
+                |resp| {
+                    // The expected response is:
+                    //  [{
+                    //      "max": <value>
+                    //  }]
+                    //
+                    //  Where <value> is either a String or a Number.
 
-            ret = match _parse_max_id_value(resp.to_owned(), log) {
-                Ok(max_num) => max_num,
-                Err(e) => {
-                    return Err(e);
-                }
-            };
-            Ok(())
+                    ret = match _parse_max_id_value(resp.to_owned(), log) {
+                        Ok(max_num) => max_num,
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    };
+                    Ok(())
+                },
+            )
         },
-    )?;
+    );
     Ok(ret)
 }
 
@@ -341,15 +351,21 @@ fn read_chunk<F>(
 where
     F: FnMut(Value, &str, u32) -> Result<(), Error>,
 {
-    match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
-        query_handler(log, a, shard_num, sharks, handler)
-    }) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            eprintln!("Got error: {}", e);
-            Err(e)
-        }
-    }
+    let _result = retry(
+        Exponential::from_millis(EXP_BACKOFF_INIT_DELAY_MILLIS)
+            .map(jitter)
+            .take(EXP_BACKOFF_RETRY_COUNT),
+        || match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
+            query_handler(log, a, shard_num, sharks, handler)
+        }) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                eprintln!("Got error: {}", e);
+                Err(e)
+            }
+        },
+    );
+    Ok(())
 }
 
 /// Find the maximum _id/_idx and, starting at 0 iterate over every entry up
@@ -533,20 +549,11 @@ where
         // need at least 1.  This is an error that should be passed back to
         // the caller via the handler as noted in MANTA-4912.
         for id in ["_id", "_idx"].iter() {
-            let mut scan_backoff = ExponentialBackoff::default();
-            let mut scan_op = || {
-                debug!(log, "attempting iter_ids with retry...");
+            if let Err(e) =
                 iter_ids(id, &moray_socket, &conf, log.clone(), i, &mut handler)
-                .map_err(|e| {
-                    error!(
-                        &log,
-                        "Encountered error scanning shard {} ({})",
-                            i, e
-                        );
-                    })?;
-                    Ok(())
-            };
-            scan_op.retry(&mut scan_backoff).expect("Could not retry scan operation");
+            {
+                error!(&log, "Encountered error scanning shard {} ({})", i, e);
+            }
         }
     }
 
