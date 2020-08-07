@@ -1,14 +1,17 @@
 [package]
 name = "sharkspotter"
-version = "0.15.0"
+version = "0.16.0"
 authors = ["Rui Loura <rui@joyent.com>", "Jon Anderson <jon.anderson@joyent.com>"]
 edition = "2018"
 
 [dependencies]
 assert_cli = "0.6.0"
-serde = { version = "1.0.89", features = ["derive"] }
-serde_json = "1.0.39"
+
+# TODO version numbers
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 clap = "2.33.0"
+lazy_static = "1.4.0"
 libmanta = { git = "https://github.com/joyent/rust-libmanta", tag = "v0.7.0" }
 moray = { git = "https://github.com/joyent/rust-moray", tag="v0.11.1" }
 slog = "2.5.2"
@@ -16,6 +19,11 @@ slog-bunyan = "2.2.0"
 slog-scope = "4.1.2"
 trust-dns-resolver = "0.11.1"
 slog-term = "2.4.1"
+
+tokio-postgres = { version="0.5.5", features = ["with-serde_json-1"]}
+tokio = {version = "0.2.22", features = ["full"]}
+futures = "0.3.5"
+serde_postgres = "0.2.0"
 
 # We don't use this directly, but gotham pulls it in via the rust-url crate.
 # If we don't specify the exact version here cargo will bring in a newer version

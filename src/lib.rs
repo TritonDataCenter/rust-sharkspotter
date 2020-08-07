@@ -47,19 +47,25 @@
 // }
 
 pub mod config;
+pub mod directdb;
 pub mod util;
 
+use lazy_static::lazy_static;
 use libmanta::moray::MantaObjectShark;
 use moray::client::MorayClient;
 use moray::objects as moray_objects;
 use serde::Deserialize;
 use serde_json::{self, Value};
 use slog::{debug, error, warn, Logger};
-use std::error::Error as StdError;
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
+use std::sync::Mutex;
 use threadpool::ThreadPool;
 use trust_dns_resolver::Resolver;
+
+lazy_static! {
+    static ref ERROR_LIST: Mutex<Vec<std::io::Error>> = Mutex::new(vec![]);
+}
 
 #[derive(Deserialize, Debug, Clone)]
 struct IdRet {
@@ -68,7 +74,8 @@ struct IdRet {
 
 #[derive(Debug)]
 pub struct SharkspotterMessage {
-    pub value: Value,
+    pub manta_value: Value,
+    pub etag: String,
     pub shark: String,
     pub shard: u32,
 }
@@ -170,6 +177,37 @@ fn _log_return_error(log: &Logger, msg: &str) -> Result<(), Error> {
     Err(Error::new(ErrorKind::Other, msg))
 }
 
+pub fn get_sharks_from_manta_obj(
+    value: &Value,
+    log: &Logger,
+) -> Result<Vec<MantaObjectShark>, Error> {
+    match value.get("sharks") {
+        Some(s) => {
+            if !s.is_array() {
+                let msg = format!("Sharks are not in an array {:#?}", s);
+                error!(log, "{}", msg);
+                return Err(Error::new(ErrorKind::Other, msg));
+            }
+
+            serde_json::from_value::<Vec<MantaObjectShark>>(s.clone()).map_err(
+                |e| {
+                    let msg = format!(
+                        "Could not deserialize sharks value {:#?}. ({})",
+                        s, e
+                    );
+                    error!(log, "{}", msg);
+                    Error::new(ErrorKind::Other, msg)
+                },
+            )
+        }
+        None => {
+            let msg = format!("Missing 'sharks' field {:#?}", value);
+            error!(log, "{}", msg);
+            Err(Error::new(ErrorKind::Other, msg))
+        }
+    }
+}
+
 /// Pull the "_value" out of the moray object without using rust structures.
 /// This takes a moray bucket entry in the form of a serde Value and returns
 /// a manta object metadata entry in the form of a serde Value.
@@ -215,6 +253,22 @@ pub fn object_id_from_manta_obj(manta_obj: &Value) -> Result<String, String> {
         .and_then(|o| Ok(o.to_string()))
 }
 
+pub fn etag_from_moray_value(moray_value: &Value) -> Result<String, String> {
+    match moray_value.get("_etag") {
+        Some(tag) => match serde_json::to_string(tag) {
+            Ok(t) => Ok(t.replace("\"", "")),
+            Err(e) => {
+                let msg = format!("Cannot convert etag to string: {}", e);
+                Err(msg)
+            }
+        },
+        None => {
+            let msg = format!("Missing etag: {:#?}", moray_value);
+            Err(msg)
+        }
+    }
+}
+
 // TODO: add tests for this function
 // See block comment at top of a file for an example of the object this is
 // working with.
@@ -239,7 +293,7 @@ fn query_handler<F>(
     handler: &mut F,
 ) -> Result<(), Error>
 where
-    F: FnMut(Value, &str, u32) -> Result<(), Error>,
+    F: FnMut(Value, &str, &str, u32) -> Result<(), Error>,
 {
     match val.as_array() {
         Some(v) => {
@@ -275,43 +329,26 @@ where
         }
     };
 
-    let _value = match manta_obj_from_moray_obj(moray_value) {
+    // here rui
+    let manta_value = match manta_obj_from_moray_obj(&moray_object) {
         Ok(v) => v,
         Err(e) => {
             return _log_return_error(log, &e);
         }
     };
 
-    let sharks: Vec<MantaObjectShark> = match _value.get("sharks") {
-        Some(s) => {
-            if !s.is_array() {
-                let msg = format!("Sharks are not in an array {:#?}", s);
-                return _log_return_error(log, &msg);
-            }
-            match serde_json::from_value::<Vec<MantaObjectShark>>(s.clone()) {
-                Ok(mos) => mos,
-                Err(e) => {
-                    let msg = format!(
-                        "Could not deserialize sharks value {:#?}. ({})",
-                        s, e
-                    );
-                    return _log_return_error(log, &msg);
-                }
-            }
-        }
-        None => {
-            let msg = format!("Missing 'sharks' field {:#?}", _value);
-            return _log_return_error(log, &msg);
-        }
-    };
+    let sharks = get_sharks_from_manta_obj(&manta_value, &log)?;
 
     // Filter on shark
     sharks
         .iter()
         .filter(|s| sharks_requested.contains(&s.manta_storage_id))
         .try_for_each(|s| {
+            // TODO: handle error
+            let etag = etag_from_moray_value(&moray_value).expect("get etag");
             handler(
-                moray_object.clone(),
+                manta_value.clone(),
+                etag.as_str(),
                 s.manta_storage_id.as_str(),
                 shard_num,
             )
@@ -339,7 +376,7 @@ fn read_chunk<F>(
     handler: &mut F,
 ) -> Result<(), Error>
 where
-    F: FnMut(Value, &str, u32) -> Result<(), Error>,
+    F: FnMut(Value, &str, &str, u32) -> Result<(), Error>,
 {
     match mclient.sql(query, vec![], r#"{"timeout": 10000}"#, |a| {
         query_handler(log, a, shard_num, sharks, handler)
@@ -363,7 +400,7 @@ fn iter_ids<F>(
     mut handler: F,
 ) -> Result<(), Error>
 where
-    F: FnMut(Value, &str, u32) -> Result<(), Error>,
+    F: FnMut(Value, &str, &str, u32) -> Result<(), Error>,
 {
     let mut mclient = MorayClient::from_str(moray_socket, log.clone(), None)?;
 
@@ -517,7 +554,7 @@ pub fn run<F>(
     mut handler: F,
 ) -> Result<(), Error>
 where
-    F: FnMut(Value, &str, u32) -> Result<(), Error>,
+    F: FnMut(Value, &str, &str, u32) -> Result<(), Error>,
 {
     let mut conf = config.clone();
     shark_fix_common(&mut conf, &log);
@@ -562,15 +599,16 @@ fn start_iter_ids_thread(
             &conf,
             log.clone(),
             shard_num,
-            |value, shark, shard_num| {
+            |manta_value, etag, shark, shard_num| {
                 let msg = SharkspotterMessage {
-                    value,
+                    manta_value,
+                    etag: etag.to_string(),
                     shark: shark.to_string(),
                     shard: shard_num,
                 };
                 obj_tx
                     .send(msg)
-                    .map_err(|e| Error::new(ErrorKind::Other, e.description()))
+                    .map_err(|e| Error::new(ErrorKind::Other, e))
             },
         ) {
             error!(
@@ -580,6 +618,57 @@ fn start_iter_ids_thread(
             // TODO: MANTA-5360
         }
     }
+}
+
+fn run_moray_shard_thread(
+    pool: &ThreadPool,
+    shard: u32,
+    obj_tx: &crossbeam_channel::Sender<SharkspotterMessage>,
+    conf: &config::Config,
+    log: &Logger,
+) -> Result<(), Error> {
+    let moray_host = format!("{}.moray.{}", shard, conf.domain);
+    let moray_ip = lookup_ip_str(moray_host.as_str())?;
+
+    // TODO: MANTA-4912
+    // We can have both _id and _idx, we don't have to have both, but we
+    // need at least 1.  This is an error that should be passed back to
+    // the caller via the handler as noted in MANTA-4912.
+    // See also MANTA-5360
+
+    // Create a thread for both _id and _idx in case we have both.
+    for id in ["_id", "_idx"].iter() {
+        pool.execute(start_iter_ids_thread(
+            id,
+            shard,
+            moray_ip.clone(),
+            obj_tx.clone(),
+            log.clone(),
+            conf.clone(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn run_direct_db_shard_thread(
+    pool: &ThreadPool,
+    shard: u32,
+    obj_tx: &crossbeam_channel::Sender<SharkspotterMessage>,
+    conf: &config::Config,
+    log: &Logger,
+) {
+    let th_obj_tx = obj_tx.clone();
+    let th_conf = conf.clone();
+    let th_log = log.clone();
+    pool.execute(move || {
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        if let Err(e) = rt.block_on(directdb::get_objects_from_shard(
+            shard, th_conf, th_log, th_obj_tx,
+        )) {
+            ERROR_LIST.lock().expect("ERROR_LIST lock").push(e);
+        }
+    });
 }
 
 /// Same as the regular `run` method, but instead we spawn a new thread per
@@ -600,30 +689,32 @@ pub fn run_multithreaded(
     shark_fix_common(&mut conf, &log);
     validate_sharks(&conf, &log)?;
 
-    for i in conf.min_shard..=conf.max_shard {
-        let moray_host = format!("{}.moray.{}", i, conf.domain);
-        let moray_ip = lookup_ip_str(moray_host.as_str())?;
-
-        // TODO: MANTA-4912
-        // We can have both _id and _idx, we don't have to have both, but we
-        // need at least 1.  This is an error that should be passed back to
-        // the caller via the handler as noted in MANTA-4912.
-        // See also MANTA-5360
-
-        // Create a thread for both _id and _idx in case we have both.
-        for id in ["_id", "_idx"].iter() {
-            pool.execute(start_iter_ids_thread(
-                id,
-                i,
-                moray_ip.clone(),
-                obj_tx.clone(),
-                log.clone(),
-                conf.clone(),
-            ));
+    for shard in conf.min_shard..=conf.max_shard {
+        if conf.direct_db {
+            run_direct_db_shard_thread(&pool, shard, &obj_tx, &conf, &log);
+        } else {
+            run_moray_shard_thread(&pool, shard, &obj_tx, &conf, &log)?;
         }
     }
 
     pool.join();
+
+    let mut error_strings = String::new();
+    let error_list = ERROR_LIST.lock().unwrap();
+    for error in error_list.iter() {
+        if error.kind() == ErrorKind::BrokenPipe {
+            continue;
+        }
+        error_strings = format!("{}{}\n", error_strings, error);
+    }
+
+    if !error_strings.is_empty() {
+        let msg = format!(
+            "Sharkspotter encountered the following errors:\n{}",
+            error_strings
+        );
+        return Err(Error::new(ErrorKind::Other, msg));
+    }
 
     Ok(())
 }
@@ -632,7 +723,6 @@ pub fn run_multithreaded(
 mod tests {
     use super::*;
     use serde_json::json;
-    use util;
 
     #[test]
     fn _parse_max_id_value_test() {

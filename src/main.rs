@@ -32,36 +32,24 @@ use std::thread;
 
 fn write_mobj_to_file<W>(
     mut writer: W,
-    moray_obj: Value,
+    manta_obj: Value,
     conf: &Config,
 ) -> Result<(), Error>
 where
     W: Write,
 {
     let out_bytes: Vec<u8>;
-    let full_object = conf.full_moray_obj;
     let obj_id_only = conf.obj_id_only;
 
-    if !full_object {
-        let out_obj = sharkspotter::manta_obj_from_moray_obj(&moray_obj)
+    if obj_id_only {
+        let obj_id = sharkspotter::object_id_from_manta_obj(&manta_obj)
             .map_err(|e| {
                 eprintln!("{}", e);
                 Error::new(ErrorKind::Other, e)
             })?;
-
-        if obj_id_only {
-            let obj_id = sharkspotter::object_id_from_manta_obj(&out_obj)
-                .map_err(|e| {
-                    eprintln!("{}", e);
-                    Error::new(ErrorKind::Other, e)
-                })?;
-            out_bytes = obj_id.as_bytes().to_owned();
-        } else {
-            out_bytes = serde_json::to_vec(&out_obj)?;
-        }
+        out_bytes = obj_id.as_bytes().to_owned();
     } else {
-        assert!(!obj_id_only);
-        out_bytes = serde_json::to_vec(&moray_obj)?;
+        out_bytes = serde_json::to_vec(&manta_obj)?;
     }
 
     writer.write_all(&out_bytes)?;
@@ -138,18 +126,22 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
                 .get_mut(&filename(shark.as_str(), shard))
                 .expect("unexpected shark");
 
-            write_mobj_to_file(file, msg.value, &closure_conf)
+            write_mobj_to_file(file, msg.manta_value, &closure_conf)
         })
     } else {
-        sharkspotter::run(&conf, log.clone(), |moray_obj, shark, shard| {
-            let shark = shark.replace(&domain_prefix, "");
-            trace!(&log, "shark: {}, shard: {}", shark, shard);
+        sharkspotter::run(
+            &conf,
+            log.clone(),
+            |manta_obj, _etag, shark, shard| {
+                let shark = shark.replace(&domain_prefix, "");
+                trace!(&log, "shark: {}, shard: {}", shark, shard);
 
-            let file =
-                file_map.get_mut(&filename(shark.as_str(), shard)).unwrap();
+                let file =
+                    file_map.get_mut(&filename(shark.as_str(), shard)).unwrap();
 
-            write_mobj_to_file(file, moray_obj, &conf)
-        })
+                write_mobj_to_file(file, manta_obj, &conf)
+            },
+        )
     }
 }
 
@@ -170,10 +162,10 @@ fn run_with_user_file(
     if conf.multithreaded {
         let closure_conf = conf.clone();
         run_multithreaded(&conf, log, move |msg| {
-            write_mobj_to_file(&mut file, msg.value, &closure_conf)
+            write_mobj_to_file(&mut file, msg.manta_value, &closure_conf)
         })
     } else {
-        sharkspotter::run(&conf, log, |moray_obj, _shark, _shard| {
+        sharkspotter::run(&conf, log, |moray_obj, _etag, _shark, _shard| {
             write_mobj_to_file(&mut file, moray_obj, &conf)
         })
     }

@@ -26,10 +26,10 @@ pub struct Config {
     pub end: u64,
     pub skip_validate_sharks: bool,
     pub output_file: Option<String>,
-    pub full_moray_obj: bool,
     pub obj_id_only: bool,
     pub multithreaded: bool,
     pub max_threads: usize,
+    pub direct_db: bool,
     pub log_level: Level,
 }
 
@@ -45,10 +45,10 @@ impl Default for Config {
             chunk_size: 1000,
             skip_validate_sharks: false,
             output_file: None,
-            full_moray_obj: false,
             obj_id_only: false,
             multithreaded: false,
             max_threads: 50,
+            direct_db: false,
             log_level: Level::Debug,
         }
     }
@@ -148,17 +148,15 @@ impl<'a, 'b> Config {
                 .help("Skip shark validation. Useful if shark is in readonly \
                 mode.")
                 .takes_value(false))
-            .arg(Arg::with_name("full_moray_object")
-                .short("F")
-                .long("full_object")
-                .help("Write full moray objects to file instead of just the \
-                manta objects.")
-                .takes_value(false))
             .arg(Arg::with_name("obj_id_only")
                 .short("O")
                 .long("object_id_only")
                 .help("Output only the object ID")
-                .conflicts_with("full_moray_object")
+                .takes_value(false))
+            .arg(Arg::with_name("direct_db")
+                .short("-D")
+                .long("direct_db")
+                .help("use direct DB access instead of moray")
                 .takes_value(false))
             .arg(Arg::with_name("log_level")
                 .short("l")
@@ -201,16 +199,16 @@ impl<'a, 'b> Config {
             config.skip_validate_sharks = true;
         }
 
-        if matches.is_present("full_moray_object") {
-            config.full_moray_obj = true;
-        }
-
         if matches.is_present("obj_id_only") {
             config.obj_id_only = true;
         }
 
         if matches.is_present("multithreaded") {
             config.multithreaded = true;
+        }
+
+        if matches.is_present("direct_db") {
+            config.direct_db = true;
         }
 
         if let Ok(max_threads) = value_t!(matches, "max_threads", usize) {
@@ -263,7 +261,6 @@ mod test {
     fn parse_args() {
         let args = vec![
             "target/debug/sharkspotter",
-            "-F",
             "-x",
             "--domain",
             "east.joyent.us",
@@ -288,7 +285,6 @@ mod test {
         let matches = Config::get_app().get_matches_from(args);
         let config = Config::config_from_matches(matches).expect("config");
 
-        assert!(config.full_moray_obj);
         assert!(config.skip_validate_sharks);
 
         assert_eq!(config.max_shard, 2);
