@@ -95,7 +95,7 @@ echo "Destroying unused delegated dataset..."
 result_json=$(sdc-oneachnode -J -n "${SERVER_UUID}" "zfs destroy zones/${NEW_UUID}/data" | json result)
 check_result "${result_json}"
 
-echo "Creating snapshot data/manate@${SNAP_NAME} on ${VICTIM_UUID}..."
+echo "Creating snapshot data/manatee@${SNAP_NAME} on ${VICTIM_UUID}..."
 result_json=$(sdc-oneachnode -J -n "${SERVER_UUID}" "zfs snapshot zones/${VICTIM_UUID}/data/manatee@${SNAP_NAME}" | json result)
 check_result "${result_json}"
 
@@ -132,22 +132,45 @@ cat >${TMP_SCRIPT} <<'EOS'
 #
 # Copyright 2020 Joyent, Inc.
 #
+
 set -o xtrace
 set -o errexit
 set -o pipefail
+
 export PATH=/usr/local/sbin:/usr/local/bin:/opt/local/sbin:/opt/local/bin:/usr/sbin:/usr/bin:/sbin
+
 hostname $(zonename)
 data_dir="/zones/$(zonename)/data"
 pg_version="$(json current < ${data_dir}/manatee-config.json)"
+
 [[ -z $(grep "postgres::907" /etc/group) ]] && groupadd -g 907 postgres && useradd -u 907 -g postgres postgres
 mkdir -p /var/pg
 chown -R postgres:postgres /var/pg
+
 # disable autovacuum and ensure we're not going to try to recover from a sync
 grep -v "^autovacuum = " ${data_dir}/data/postgresql.conf > ${data_dir}/data/postgresql.conf.new
 echo "autovacuum = off" >> ${data_dir}/data/postgresql.conf
 [[ -f ${data_dir}/data/recovery.conf ]] && mv ${data_dir}/data/recovery.conf ${data_dir}/data/recovery.conf.disabled
+
 PGBIN="/opt/postgresql/${pg_version}/bin"
 PGDATA="${data_dir}/data"
+
+# set our own pg_hba.conf so connections are allowed from `manta` and `admin`
+# networks.
+cat > ${PGDATA}/pg_hba.conf <<EOF
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+
+# "local" is for Unix domain socket connections only
+local   all             all                                     trust
+local   replication     admin                                   trust
+# IPv4 local connections:
+host    all             all             127.0.0.1/32            trust
+# IPv6 local connections:
+host    all             all             ::1/128                 trust
+# Allow any remote connections on `admin` or `manta` network
+host    all             all             0.0.0.0/0               trust
+EOF
+
 # Copied from pkgsrc version and modified to fit
 cat > pg.xml <<EOF
 <?xml version='1.0'?>
@@ -184,31 +207,40 @@ cat > pg.xml <<EOF
   </service>
 </service_bundle>
 EOF
+
 svccfg import pg.xml
+
 # Generate registrar config, then import and start the service
+
 MY_IP=$(mdata-get sdc:nics | json -Ha nic_tag ip  | grep "^manta" | cut -d ' ' -f2)
 if [[ -z "${MY_IP}" ]]; then
     echo "Unable to determine Manta IP" >&2
     exit 1
 fi
+
 # Ensure the domain looks like <shard>.moray.* since we depend on that in our mutation
 if [[ -z $(json registration.domain < /opt/smartdc/registrar/etc/config.json.in | grep "^[0-9]*\.moray\." 2>/dev/null) ]]; then
     echo "Invalid config: bad registration.domain" >&2
     exit 1
 fi
+
 json -e "this.adminIp = '${MY_IP}'" \
     -e 'this.registration.aliases = [this.registration.domain.replace(/\.moray\./, ".rebalancer-postgres.")]' \
     -e 'this.registration.domain = this.registration.domain.replace(/^.*\.moray\./, "rebalancer-postgres.")' \
     > /opt/smartdc/registrar/etc/config.json < /opt/smartdc/registrar/etc/config.json.in
+
 svccfg import /opt/smartdc/registrar/smf/manifests/registrar.xml
 svcadm enable registrar
+
 # Fix the prompt to be something more useful
+
 alias="$(mdata-get sdc:alias)"
 if [[ -n ${alias} ]]; then
 cat >> /root/.bashrc <<EOF
 export PS1="[\u@${alias} \w]\$ "
 EOF
 fi
+
 EOS
 
 # Upload the script into place
