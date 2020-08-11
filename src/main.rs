@@ -69,7 +69,7 @@ where
         + FnMut(SharkspotterMessage) -> Result<(), Error>,
 {
     let channel: (Sender<SharkspotterMessage>, Receiver<SharkspotterMessage>) =
-        crossbeam_channel::bounded(10);
+        crossbeam_channel::bounded(100);
     let obj_tx = channel.0;
     let obj_rx = channel.1;
     let handle = thread::spawn(move || {
@@ -112,6 +112,7 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
             file_map.insert(fname, BufWriter::new(file));
         }
     }
+
     if conf.multithreaded {
         let closure_conf = conf.clone();
         run_multithreaded(&conf, log.clone(), move |msg| {

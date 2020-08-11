@@ -77,7 +77,7 @@ pub async fn get_objects_from_shard(
         .await
         .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
-    let handle = tokio::spawn(async move {
+    tokio::spawn(async move {
         connection
             .await
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
@@ -142,9 +142,5 @@ pub async fn get_objects_from_shard(
         }
     }
 
-    // We only have a single future to join here so we can cheat and use '0'.
-    tokio::join!(handle)
-        .0
-        .expect("join")
-        .map_err(|e| Error::new(ErrorKind::Other, e))
+    Ok(())
 }
