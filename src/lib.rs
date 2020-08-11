@@ -253,18 +253,18 @@ pub fn object_id_from_manta_obj(manta_obj: &Value) -> Result<String, String> {
         .and_then(|o| Ok(o.to_string()))
 }
 
-pub fn etag_from_moray_value(moray_value: &Value) -> Result<String, String> {
+pub fn etag_from_moray_value(moray_value: &Value) -> Result<String, Error> {
     match moray_value.get("_etag") {
         Some(tag) => match serde_json::to_string(tag) {
             Ok(t) => Ok(t.replace("\"", "")),
             Err(e) => {
                 let msg = format!("Cannot convert etag to string: {}", e);
-                Err(msg)
+                Err(Error::new(ErrorKind::Other, msg))
             }
         },
         None => {
             let msg = format!("Missing etag: {:#?}", moray_value);
-            Err(msg)
+            Err(Error::new(ErrorKind::Other, msg))
         }
     }
 }
@@ -345,7 +345,7 @@ where
         .filter(|s| sharks_requested.contains(&s.manta_storage_id))
         .try_for_each(|s| {
             // TODO: handle error
-            let etag = etag_from_moray_value(&moray_value).expect("get etag");
+            let etag = etag_from_moray_value(&moray_value)?;
             handler(
                 manta_value.clone(),
                 etag.as_str(),
