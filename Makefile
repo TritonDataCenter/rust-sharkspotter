@@ -20,9 +20,21 @@ all: build-sharkspotter
 build-sharkspotter:
 	$(CARGO) build --release
 
+.PHONY: libtest
+libtest:
+	$(CARGO) test --lib
+
+.PHONY: libtest
+integrationtest:
+	$(CARGO) test --test integration
+
+# for jenkins to run lib tests and a subset of integration tests
+.PHONY: prepush
+prepush: libtest
+	$(CARGO) test --test integration cli
+	
 .PHONY: test
-test:
-	$(CARGO) test
+test: libtest integrationtest
 
 .PHONY: check
 check:

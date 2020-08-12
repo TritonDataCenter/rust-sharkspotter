@@ -15,7 +15,7 @@ USAGE:
     sharkspotter [FLAGS] [OPTIONS] --domain <MORAY_DOMAIN> --shark <STORAGE_ID>...
 
 FLAGS:
-    -F, --full_object       Write full moray objects to file instead of just the manta objects.
+    -D, --direct_db         use direct DB access instead of moray
     -h, --help              Prints help information
     -T, --multithreaded     Run with multiple threads, one per shard
     -O, --object_id_only    Output only the object ID
