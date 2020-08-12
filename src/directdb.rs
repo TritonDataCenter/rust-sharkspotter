@@ -12,7 +12,7 @@ use crossbeam_channel as crossbeam;
 use futures::{pin_mut, TryStreamExt};
 use serde_json::{self, Value};
 use std::io::{Error, ErrorKind};
-use tokio_postgres::NoTls;
+use tokio_postgres::{NoTls, Row};
 
 use crate::config::Config;
 use crate::{
@@ -68,6 +68,7 @@ pub async fn get_objects_from_shard(
         format!("{}.rebalancer-postgres.{}", shard, conf.domain);
 
     debug!(log, "Connecting to {}", shard_host_name);
+    // Connect to this shard's reblancer-postgres moray database.
     let (client, connection) = tokio_postgres::Config::new()
         .host(shard_host_name.as_str())
         .user("postgres")
@@ -90,6 +91,8 @@ pub async fn get_objects_from_shard(
         .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
     pin_mut!(rows);
+    // Iterate over the rows in the stream.  For each one determine if it
+    // matches the shark we are looking for.
     while let Some(row) = rows
         .try_next()
         .await
@@ -98,49 +101,73 @@ pub async fn get_objects_from_shard(
         let val_str: &str = row.get("_value");
         let value: Value = serde_json::from_str(val_str)
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
-        let obj_id = object_id_from_manta_obj(&value)
-            .map_err(|e| Error::new(ErrorKind::Other, e))?;
-        let sharks = get_sharks_from_manta_obj(&value, &log)?;
-
-        trace!(log, "sharkspotter checking {}", obj_id);
-        if let Err(e) = sharks
-            .iter()
-            .filter(|s| conf.sharks.contains(&s.manta_storage_id))
-            .try_for_each(|s| {
-                trace!(log, "Found matching record: {:#?}", &row);
-                let moray_object: MorayMantaBucketObject =
-                    serde_postgres::from_row(&row).map_err(|e| {
-                        error!(
-                            log,
-                            "Error deserializing record as manta object: {}", e
-                        );
-                        Error::new(ErrorKind::Other, e)
-                    })?;
-
-                let etag = moray_object._etag.clone();
-                let manta_value_str = moray_object._value.as_str();
-                let manta_value: Value = serde_json::from_str(manta_value_str)
-                    .map_err(|e| Error::new(ErrorKind::Other, e))?;
-
-                debug!(log, "Sending value: {:#?}", manta_value);
-
-                let msg = SharkspotterMessage {
-                    manta_value,
-                    etag,
-                    shark: s.manta_storage_id.clone(),
-                    shard,
-                };
-
-                if let Err(e) = obj_tx.send(msg) {
-                    warn!(log, "Tx channel disconnected: {}", e);
-                    return Err(Error::new(ErrorKind::BrokenPipe, e));
-                }
-                Ok(())
-            })
-        {
+        if let Err(e) = check_value_for_match(
+            &value,
+            &row,
+            &conf.sharks,
+            shard,
+            &obj_tx,
+            &log,
+        ) {
             return Err(e);
         }
     }
 
+    Ok(())
+}
+
+fn check_value_for_match(
+    value: &Value,
+    row: &Row,
+    filter_sharks: &[String],
+    shard: u32,
+    obj_tx: &crossbeam_channel::Sender<SharkspotterMessage>,
+    log: &Logger,
+) -> Result<(), Error> {
+    let obj_id = object_id_from_manta_obj(value)
+        .map_err(|e| Error::new(ErrorKind::Other, e))?;
+    let sharks = get_sharks_from_manta_obj(value, log)?;
+
+    trace!(log, "sharkspotter checking {}", obj_id);
+    sharks
+        .iter()
+        .filter(|s| filter_sharks.contains(&s.manta_storage_id))
+        .try_for_each(|s| {
+            send_matching_object(row, &s.manta_storage_id, shard, &obj_tx, log)
+        })
+}
+
+fn send_matching_object(
+    row: &Row,
+    shark_name: &str,
+    shard: u32,
+    obj_tx: &crossbeam_channel::Sender<SharkspotterMessage>,
+    log: &Logger,
+) -> Result<(), Error> {
+    trace!(log, "Found matching record: {:#?}", &row);
+    let moray_object: MorayMantaBucketObject = serde_postgres::from_row(&row)
+        .map_err(|e| {
+        error!(log, "Error deserializing record as manta object: {}", e);
+        Error::new(ErrorKind::Other, e)
+    })?;
+
+    let etag = moray_object._etag.clone();
+    let manta_value_str = moray_object._value.as_str();
+    let manta_value: Value = serde_json::from_str(manta_value_str)
+        .map_err(|e| Error::new(ErrorKind::Other, e))?;
+
+    debug!(log, "Sending value: {:#?}", manta_value);
+
+    let msg = SharkspotterMessage {
+        manta_value,
+        etag,
+        shark: shark_name.to_string(),
+        shard,
+    };
+
+    if let Err(e) = obj_tx.send(msg) {
+        warn!(log, "Tx channel disconnected: {}", e);
+        return Err(Error::new(ErrorKind::BrokenPipe, e));
+    }
     Ok(())
 }
