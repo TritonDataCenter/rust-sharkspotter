@@ -657,30 +657,19 @@ fn run_direct_db_shard_thread(
     obj_tx: &crossbeam_channel::Sender<SharkspotterMessage>,
     conf: &config::Config,
     log: &Logger,
-) -> Result<(), Error> {
+) {
     let th_obj_tx = obj_tx.clone();
     let th_conf = conf.clone();
     let th_log = log.clone();
-    /*
-    let mut conn_rt = tokio::runtime::Runtime::new().unwrap();
-    let (client, connection) =
-        conn_rt.block_on(directdb::get_db_connection(shard, conf, log))?;
-
-     */
 
     pool.execute(move || {
         let mut rt = tokio::runtime::Runtime::new().unwrap();
         if let Err(e) = rt.block_on(directdb::get_objects_from_shard(
-            shard,
-            th_conf,
-            None,
-            th_log,
-            th_obj_tx,
+            shard, th_conf, th_log, th_obj_tx,
         )) {
             ERROR_LIST.lock().expect("ERROR_LIST lock").push(e);
         }
     });
-    Ok(())
 }
 
 /// Same as the regular `run` method, but instead we spawn a new thread per
@@ -703,7 +692,7 @@ pub fn run_multithreaded(
 
     for shard in conf.min_shard..=conf.max_shard {
         if conf.direct_db {
-            run_direct_db_shard_thread(&pool, shard, &obj_tx, &conf, &log)?;
+            run_direct_db_shard_thread(&pool, shard, &obj_tx, &conf, &log);
         } else {
             run_moray_shard_thread(&pool, shard, &obj_tx, &conf, &log)?;
         }
