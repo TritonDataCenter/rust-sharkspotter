@@ -661,6 +661,7 @@ fn run_direct_db_shard_thread(
     let th_obj_tx = obj_tx.clone();
     let th_conf = conf.clone();
     let th_log = log.clone();
+
     pool.execute(move || {
         let mut rt = tokio::runtime::Runtime::new().unwrap();
         if let Err(e) = rt.block_on(directdb::get_objects_from_shard(

@@ -10,7 +10,9 @@
 
 use crossbeam_channel as crossbeam;
 use futures::{pin_mut, TryStreamExt};
+use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
+use slog::{debug, error, trace, warn, Logger};
 use std::io::{Error, ErrorKind};
 use tokio_postgres::{NoTls, Row};
 
@@ -18,8 +20,6 @@ use crate::config::Config;
 use crate::{
     get_sharks_from_manta_obj, object_id_from_manta_obj, SharkspotterMessage,
 };
-use serde::{Deserialize, Serialize};
-use slog::{debug, error, trace, warn, Logger};
 
 // Unfortunately the Manta records in the moray database are slightly
 // different from what we get back from the moray service (both for the
@@ -76,19 +76,32 @@ pub async fn get_objects_from_shard(
         .keepalives_idle(std::time::Duration::from_secs(30))
         .connect(NoTls)
         .await
-        .map_err(|e| Error::new(ErrorKind::Other, e))?;
+        .map_err(|e| {
+            error!(log, "failed to connect to {}: {}", &shard_host_name, e);
+            Error::new(ErrorKind::Other, e)
+        })?;
+
+    let task_host_name = shard_host_name.clone();
+    let task_log = log.clone();
 
     tokio::spawn(async move {
-        connection
-            .await
-            .map_err(|e| Error::new(ErrorKind::Other, e))?;
+        connection.await.map_err(|e| {
+            error!(
+                task_log,
+                "could not communicate with {}: {}", task_host_name, e
+            );
+            Error::new(ErrorKind::Other, e)
+        })?;
         Ok::<(), Error>(())
     });
 
     let rows = client
         .query_raw("SELECT * from manta where type='object'", vec![])
         .await
-        .map_err(|e| Error::new(ErrorKind::Other, e))?;
+        .map_err(|e| {
+            error!(log, "query error for {}: {}", &shard_host_name, e);
+            Error::new(ErrorKind::Other, e)
+        })?;
 
     pin_mut!(rows);
     // Iterate over the rows in the stream.  For each one determine if it
