@@ -10,16 +10,17 @@
 
 use crossbeam_channel as crossbeam;
 use futures::{pin_mut, TryStreamExt};
+use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
+use slog::{debug, error, trace, warn, Logger};
 use std::io::{Error, ErrorKind};
-use tokio_postgres::{NoTls, Row};
+use tokio_postgres::tls::NoTlsStream;
+use tokio_postgres::{Client, Connection, NoTls, Row, Socket};
 
 use crate::config::Config;
 use crate::{
     get_sharks_from_manta_obj, object_id_from_manta_obj, SharkspotterMessage,
 };
-use serde::{Deserialize, Serialize};
-use slog::{debug, error, trace, warn, Logger};
 
 // Unfortunately the Manta records in the moray database are slightly
 // different from what we get back from the moray service (both for the
@@ -58,18 +59,17 @@ struct MorayMantaBucketObject {
     record_type: String,
 }
 
-pub async fn get_objects_from_shard(
+pub async fn get_db_connection(
     shard: u32,
-    conf: Config,
-    log: Logger,
-    obj_tx: crossbeam::Sender<SharkspotterMessage>,
-) -> Result<(), Error> {
+    conf: &Config,
+    log: &Logger,
+) -> Result<(Client, Connection<Socket, NoTlsStream>), Error> {
     let shard_host_name =
         format!("{}.rebalancer-postgres.{}", shard, conf.domain);
 
     debug!(log, "Connecting to {}", shard_host_name);
     // Connect to this shard's reblancer-postgres moray database.
-    let (client, connection) = tokio_postgres::Config::new()
+    tokio_postgres::Config::new()
         .host(shard_host_name.as_str())
         .user("postgres")
         .dbname("moray")
@@ -79,10 +79,26 @@ pub async fn get_objects_from_shard(
         .map_err(|e| {
             error!(log, "failed to connect to {}: {}", &shard_host_name, e);
             Error::new(ErrorKind::Other, e)
-        })?;
+        })
+}
 
+pub async fn get_objects_from_shard(
+    shard: u32,
+    conf: Config,
+    db_conn: Option<(Client, Connection<Socket, NoTlsStream>)>,
+    log: Logger,
+    obj_tx: crossbeam::Sender<SharkspotterMessage>,
+) -> Result<(), Error> {
+    let (client, connection) = match db_conn {
+        Some((cl, cn)) => (cl, cn),
+        None => get_db_connection(shard, &conf, &log).await?,
+    };
+
+    let shard_host_name =
+        format!("{}.rebalancer-postgres.{}", shard, conf.domain);
     let task_host_name = shard_host_name.clone();
     let task_log = log.clone();
+
     tokio::spawn(async move {
         connection.await.map_err(|e| {
             error!(
