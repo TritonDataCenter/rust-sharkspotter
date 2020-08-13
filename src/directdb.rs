@@ -76,19 +76,31 @@ pub async fn get_objects_from_shard(
         .keepalives_idle(std::time::Duration::from_secs(30))
         .connect(NoTls)
         .await
-        .map_err(|e| Error::new(ErrorKind::Other, e))?;
+        .map_err(|e| {
+            error!(log, "failed to connect to {}: {}", &shard_host_name, e);
+            Error::new(ErrorKind::Other, e)
+        })?;
 
+    let task_host_name = shard_host_name.clone();
+    let task_log = log.clone();
     tokio::spawn(async move {
-        connection
-            .await
-            .map_err(|e| Error::new(ErrorKind::Other, e))?;
+        connection.await.map_err(|e| {
+            error!(
+                task_log,
+                "could not communicate with {}: {}", task_host_name, e
+            );
+            Error::new(ErrorKind::Other, e)
+        })?;
         Ok::<(), Error>(())
     });
 
     let rows = client
         .query_raw("SELECT * from manta where type='object'", vec![])
         .await
-        .map_err(|e| Error::new(ErrorKind::Other, e))?;
+        .map_err(|e| {
+            error!(log, "query error for {}: {}", &shard_host_name, e);
+            Error::new(ErrorKind::Other, e)
+        })?;
 
     pin_mut!(rows);
     // Iterate over the rows in the stream.  For each one determine if it
