@@ -50,7 +50,7 @@ NEW_ALIAS=$(json -e "this.alias = this.alias.replace(/\.postgres\./, '.rebalance
 NEW_JSON=$(json -e 'this.new = {autoboot: false, billing_id: this.billing_id, brand: this.brand, cpu_shares: this.cpu_shares, customer_metadata: this.customer_metadata, delegate_dataset: true, dns_domain: this.dns_domain, image_uuid: this.image_uuid, max_locked_memory: this.max_locked_memory, max_lwps: this.max_lwps, max_physical_memory: this.max_physical_memory, max_swap: this.max_swap, owner_uuid: this.owner_uuid, quota: this.quota, ram: this.ram, resolvers: this.resolvers, server_uuid: this.server_uuid, tags: this.tags, tmpfs: this.tmpfs, zfs_io_priority: this.zfs_io_priority}' \
      -e 'this.new.cpu_cap = 0' \
      -e 'this.new.customer_metadata["user-script"] = "#!/usr/bin/bash\n#\nset -o xtrace\nset -o errexit\n\nif [[ -f /setup.sh ]]; then\n\t${DIR}/setup.sh\nfi\n"' \
-     -e 'this.new.tags.manta_role = "rebalancer-postgres"' \
+     -e 'this.new.tags.manta_role = "rebalancer-pg-clone"' \
      -e "this.new.uuid = '${NEW_UUID}'" \
      -e "this.new.alias = '${NEW_ALIAS}'" \
      -e 'this.new.networks = this.nics.map(function _mapNic(n) { return {ipv4_uuid: n.network_uuid, mtu: n.mtu, nic_tag: n.nic_tag, primary: n.primary, vlan_id: n.vlan_id }})' \
