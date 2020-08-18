@@ -16,11 +16,20 @@ use std::str::FromStr;
 const MAX_THREADS: usize = 100;
 
 #[derive(Clone, Debug)]
+pub enum FilterType {
+    Shark(Vec<String>),
+    NumCopies(u32),
+}
+
+
+#[derive(Clone)]
 pub struct Config {
     pub min_shard: u32,
     pub max_shard: u32,
     pub domain: String,
     pub sharks: Vec<String>,
+    pub copies_filter: u32,
+    pub filter_type: FilterType,
     pub chunk_size: u64,
     pub begin: u64,
     pub end: u64,
@@ -43,6 +52,8 @@ impl Default for Config {
             begin: 0,
             end: 0,
             chunk_size: 1000,
+            copies_filter: 2,
+            filter_type: FilterType::Shark(vec!["".to_string()]),
             skip_validate_sharks: false,
             output_file: None,
             obj_id_only: false,
@@ -158,6 +169,15 @@ impl<'a, 'b> Config {
                 .long("direct_db")
                 .help("use direct DB access instead of moray")
                 .takes_value(false))
+            .arg(Arg::with_name("direct_db")
+                .short("-C")
+                .long("copies_filter")
+                .value_name("NUM_COPIES")
+                .required(true)
+                .help("only retain objects that are on more than NUM_COPIES \
+                sharks")
+                .conflicts_with("shark")
+                .takes_value(true))
             .arg(Arg::with_name("log_level")
                 .short("l")
                 .long("log_level")
@@ -220,11 +240,24 @@ impl<'a, 'b> Config {
         }
 
         config.domain = matches.value_of("domain").unwrap().to_string();
-        config.sharks = matches
-            .values_of("shark")
-            .unwrap()
-            .map(String::from)
-            .collect();
+
+        if matches.is_present("copies_filter") {
+            config.sharks = vec![];
+            config.copies_filter = matches
+                .value_of("copies_filter")
+                .expect("copies filter")
+                .parse::<u32>()
+                .expect("parse copies filter");
+            config.filter_type = FilterType::NumCopies(config.copies_filter);
+        } else {
+            config.copies_filter = 0;
+            config.sharks = matches
+                .values_of("shark")
+                .unwrap()
+                .map(String::from)
+                .collect();
+            config.filter_type = FilterType::Shark(config.sharks.clone());
+        }
 
         if let Err(e) = validate_config(&mut config) {
             eprintln!("{}", e);
