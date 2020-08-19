@@ -25,6 +25,10 @@ use crate::{
 // different from what we get back from the moray service (both for the
 // `findobjects` and `sql` endpoints.  So if we are going direct to the database
 // we need to use a different struct to represent the record (DB schema).
+// Fortunately we don't need every field, only _value and _etag.  Note that
+// there are some differences in production manta schema versus the latest
+// manta schema.  Specifically production has a 4 byte int for _id and it
+// also includes the _idx column.
 //
 // moray=> SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_name = 'manta';
 // table_name | column_name | data_type
@@ -42,20 +46,9 @@ use crate::{
 //  manta      | objectid    | text
 //  manta      | type        | text
 #[derive(Deserialize, Serialize)]
-struct MorayMantaBucketObject {
-    _id: i64,
-    _txn_snap: Option<i32>,
-    _key: String,
+struct MorayMantaBucketObjectEssential {
     _value: String,
     _etag: String,
-    _mtime: i64,
-    _vnode: i64,
-    dirname: String,
-    name: String,
-    owner: String,
-    objectid: String,
-    #[serde(alias = "type")]
-    record_type: String,
 }
 
 pub async fn get_objects_from_shard(
@@ -158,11 +151,11 @@ fn send_matching_object(
     log: &Logger,
 ) -> Result<(), Error> {
     trace!(log, "Found matching record: {:#?}", &row);
-    let moray_object: MorayMantaBucketObject = serde_postgres::from_row(&row)
-        .map_err(|e| {
-        error!(log, "Error deserializing record as manta object: {}", e);
-        Error::new(ErrorKind::Other, e)
-    })?;
+    let moray_object: MorayMantaBucketObjectEssential =
+        serde_postgres::from_row(&row).map_err(|e| {
+            error!(log, "Error deserializing record as manta object: {}", e);
+            Error::new(ErrorKind::Other, e)
+        })?;
 
     let etag = moray_object._etag.clone();
     let manta_value_str = moray_object._value.as_str();
