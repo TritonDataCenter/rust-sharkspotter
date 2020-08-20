@@ -663,7 +663,27 @@ fn run_direct_db_shard_thread(
     let th_log = log.clone();
 
     pool.execute(move || {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        // Create a runtime with a maximum number of running threads no greater
+        // than half of the CPUs available.  By default tokio sets max_threads
+        // to 512 and core_threads to num cpus.  With this approach
+        // max_threads will always be 1 more than core_threads and won't trip
+        // the assertion that core_threads <= max_threads.
+        let core_threads = std::cmp::max(1, num_cpus::get() / 2);
+        let thread_name = format!("db-scanner-{}", shard);
+
+        let mut rt = match tokio::runtime::Builder::new()
+            .max_threads(core_threads + 1)
+            .core_threads(core_threads)
+            .thread_name(thread_name.as_str())
+            .build()
+        {
+            Ok(r) => r,
+            Err(e) => {
+                ERROR_LIST.lock().expect("ERROR_LIST lock").push(e);
+                return;
+            }
+        };
+
         if let Err(e) = rt.block_on(directdb::get_objects_from_shard(
             shard, th_conf, th_log, th_obj_tx,
         )) {
