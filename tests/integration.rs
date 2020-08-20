@@ -162,13 +162,16 @@ mod direct_db {
 
     #[test]
     fn directdb_test() {
+        // The log level has a significant impact on the runtime of this test.
+        // If an error is encountered consider bumping this log level to
+        // Trace and re-running.
         let conf = config::Config {
             direct_db: true,
             min_shard: 1,
             max_shard: 2,
             domain: "east.joyent.us".to_string(),
             sharks: vec!["1.stor.east.joyent.us".to_string()],
-            log_level: Level::Trace,
+            log_level: Level::Info,
             ..Default::default()
         };
         let _guard = util::init_global_logger(Some(conf.log_level));
