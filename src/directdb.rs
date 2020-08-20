@@ -162,7 +162,7 @@ fn send_matching_object(
     let manta_value: Value = serde_json::from_str(manta_value_str)
         .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
-    debug!(log, "Sending value: {:#?}", manta_value);
+    trace!(log, "Sending value: {:#?}", manta_value);
 
     let msg = SharkspotterMessage {
         manta_value,

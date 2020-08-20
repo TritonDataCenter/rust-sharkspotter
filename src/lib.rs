@@ -663,30 +663,38 @@ fn run_direct_db_shard_thread(
     let th_log = log.clone();
 
     pool.execute(move || {
-        // Create a runtime with a maximum number of running threads no greater
-        // than half of the CPUs available.  By default tokio sets max_threads
-        // to 512 and core_threads to num cpus.  With this approach
-        // max_threads will always be 1 more than core_threads and won't trip
-        // the assertion that core_threads <= max_threads.
-        let core_threads = std::cmp::max(1, num_cpus::get() / 2);
-        let thread_name = format!("db-scanner-{}", shard);
-
+        // In test we noticed that the basic scheduler outperformed both the
+        // `threaded_scheduler()` with tuned thread counts and the default
+        // thread counts provided by `Runtime::new()` by 33%.  It also does not
+        // create any additional LWPs.
         let mut rt = match tokio::runtime::Builder::new()
-            .max_threads(core_threads + 1)
-            .core_threads(core_threads)
-            .thread_name(thread_name.as_str())
+            .enable_all()
+            .basic_scheduler()
             .build()
         {
             Ok(r) => r,
             Err(e) => {
+                error!(th_log, "could not create runtime: {}", e);
                 ERROR_LIST.lock().expect("ERROR_LIST lock").push(e);
                 return;
             }
         };
 
         if let Err(e) = rt.block_on(directdb::get_objects_from_shard(
-            shard, th_conf, th_log, th_obj_tx,
+            shard,
+            th_conf,
+            th_log.clone(),
+            th_obj_tx,
         )) {
+            // We use BrokenPipe in directdb::send_matching_object() to
+            // indicate that our receiver has shutdown.
+            // This is not an error in the context of lib sharkspotter.  The
+            // consumer of sharkspotter may encounter an error which causes
+            // it to stop receiving objects, but that error should be
+            // handled by the consumer not here.
+            if e.kind() != ErrorKind::BrokenPipe {
+                error!(th_log, "shard thread error: {}", e);
+            }
             ERROR_LIST.lock().expect("ERROR_LIST lock").push(e);
         }
     });
