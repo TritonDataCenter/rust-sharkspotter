@@ -686,7 +686,15 @@ fn run_direct_db_shard_thread(
             th_log.clone(),
             th_obj_tx,
         )) {
-            error!(th_log, "shard thread error: {}", e);
+            // We use BrokenPipe in directdb::send_matching_object() to
+            // indicate that our receiver has shutdown.
+            // This is not an error in the context of lib sharkspotter.  The
+            // consumer of sharkspotter may encounter an error which causes
+            // it to stop receiving objects, but that error should be
+            // handled by the consumer not here.
+            if e.kind() != ErrorKind::BrokenPipe {
+                error!(th_log, "shard thread error: {}", e);
+            }
             ERROR_LIST.lock().expect("ERROR_LIST lock").push(e);
         }
     });
