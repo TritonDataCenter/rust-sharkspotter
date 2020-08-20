@@ -24,7 +24,7 @@ build-sharkspotter:
 libtest:
 	$(CARGO) test --lib
 
-.PHONY: libtest
+.PHONY: integrationtest 
 integrationtest:
 	$(CARGO) test --test integration
 
