@@ -1,6 +1,6 @@
 [package]
 name = "sharkspotter"
-version = "0.16.3"
+version = "0.16.4"
 authors = ["Rui Loura <rui@joyent.com>", "Jon Anderson <jon.anderson@joyent.com>"]
 edition = "2018"
 
@@ -30,6 +30,7 @@ serde_postgres = "0.2.0"
 unicode-normalization = "=0.1.5"
 crossbeam-channel = "0.4.2"
 threadpool = "1.8.1"
+num_cpus = "1.8.0"
 
 [patch.crates-io]
 # We require the use of certain constructs which unfortunately were not
