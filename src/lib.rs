@@ -681,7 +681,10 @@ fn run_direct_db_shard_thread(
         };
 
         if let Err(e) = rt.block_on(directdb::get_objects_from_shard(
-            shard, th_conf, th_log.clone(), th_obj_tx,
+            shard,
+            th_conf,
+            th_log.clone(),
+            th_obj_tx,
         )) {
             error!(th_log, "shard thread error: {}", e);
             ERROR_LIST.lock().expect("ERROR_LIST lock").push(e);
