@@ -161,34 +161,19 @@ fn run_with_user_file(
     conf: Config,
     log: Logger,
 ) -> Result<(), Error> {
-    /*
-    let path = Path::new(filename.as_str());
-    let mut file = match OpenOptions::new().append(true).create(true).open(path)
-    {
-        Err(e) => {
-            panic!("Couldn't create output file '{}': {}", path.display(), e)
-        }
-        Ok(file) => file,
-    };
-
-     */
+    // Hacked up to consider user file as directory
     let mut file_map = HashMap::new();
     let dirname = format!("./{}", directory);
     fs::create_dir(dirname.as_str())?;
 
     add_shards_to_file_map_for_dir(&conf, &directory, &mut file_map);
 
-    println!("created filemap: {:#?}", file_map);
-
     if conf.multithreaded {
         let closure_conf = conf.clone();
         run_multithreaded(&conf, log, move |msg| {
             let shard = msg.shard;
             let fname = get_shard_filename(&directory, shard);
-            println!("Filename: {}", fname);
-            let file = file_map
-                .get_mut(&fname)
-                .expect("unexpected shark");
+            let file = file_map.get_mut(&fname).expect("unexpected shark");
 
             write_mobj_to_file(file, msg.manta_value, &closure_conf)
         })
