@@ -89,25 +89,23 @@ fn get_shard_filename(dir: &str, shard: u32) -> String {
     format!("{}/shard_{}.objs", dir, shard)
 }
 
-fn add_shards_to_file_map_for_dir(conf: &Config, directory: &str, file_map:
-&mut
-FileMap) {
-
+fn add_shards_to_file_map_for_dir(
+    conf: &Config,
+    directory: &str,
+    file_map: &mut FileMap,
+) {
     for shard in conf.min_shard..=conf.max_shard {
         let fname = get_shard_filename(directory, shard);
         let path = Path::new(fname.as_str());
-        let file = match OpenOptions::new()
-            .append(true)
-            .create_new(true)
-            .open(path)
-        {
-            Err(e) => panic!(
-                "Couldn't create output file '{}': {}",
-                path.display(),
-                e
-            ),
-            Ok(file) => file,
-        };
+        let file =
+            match OpenOptions::new().append(true).create_new(true).open(path) {
+                Err(e) => panic!(
+                    "Couldn't create output file '{}': {}",
+                    path.display(),
+                    e
+                ),
+                Ok(file) => file,
+            };
 
         file_map.insert(fname, BufWriter::new(file));
     }
@@ -148,8 +146,9 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
                 let shark = shark.replace(&domain_prefix, "");
                 trace!(&log, "shark: {}, shard: {}", shark, shard);
 
-                let file =
-                    file_map.get_mut(&get_shard_filename(shark.as_str(), shard)).unwrap();
+                let file = file_map
+                    .get_mut(&get_shard_filename(shark.as_str(), shard))
+                    .unwrap();
 
                 write_mobj_to_file(file, manta_obj, &conf)
             },
@@ -158,7 +157,7 @@ fn run_with_file_map(conf: Config, log: Logger) -> Result<(), Error> {
 }
 
 fn run_with_user_file(
-    filename: String,
+    directory: String,
     conf: Config,
     log: Logger,
 ) -> Result<(), Error> {
@@ -174,25 +173,29 @@ fn run_with_user_file(
 
      */
     let mut file_map = HashMap::new();
-    let dirname = format!("./{}", filename);
+    let dirname = format!("./{}", directory);
     fs::create_dir(dirname.as_str())?;
 
-    add_shards_to_file_map_for_dir(&conf, &filename, &mut file_map);
+    add_shards_to_file_map_for_dir(&conf, &directory, &mut file_map);
+
+    println!("created filemap: {:#?}", file_map);
 
     if conf.multithreaded {
         let closure_conf = conf.clone();
         run_multithreaded(&conf, log, move |msg| {
             let shard = msg.shard;
+            let fname = get_shard_filename(&directory, shard);
+            println!("Filename: {}", fname);
             let file = file_map
-            .get_mut(&get_shard_filename(filename.as_str(), shard))
-            .expect("unexpected shark");
+                .get_mut(&fname)
+                .expect("unexpected shark");
 
             write_mobj_to_file(file, msg.manta_value, &closure_conf)
         })
     } else {
         sharkspotter::run(&conf, log, |moray_obj, _etag, _shark, shard| {
             let file = file_map
-                .get_mut(&get_shard_filename(filename.as_str(), shard))
+                .get_mut(&get_shard_filename(directory.as_str(), shard))
                 .expect("unexpected shark");
 
             write_mobj_to_file(file, moray_obj, &conf)

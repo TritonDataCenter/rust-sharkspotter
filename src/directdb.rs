@@ -17,7 +17,10 @@ use std::io::{Error, ErrorKind};
 use tokio_postgres::{NoTls, Row};
 
 use crate::config::Config;
-use crate::{get_sharks_from_manta_obj, object_id_from_manta_obj, SharkspotterMessage, config};
+use crate::{
+    config, get_sharks_from_manta_obj, object_id_from_manta_obj,
+    SharkspotterMessage,
+};
 
 // Unfortunately the Manta records in the moray database are slightly
 // different from what we get back from the moray service (both for the
@@ -112,14 +115,9 @@ pub async fn get_objects_from_shard(
         let val_str: &str = row.get("_value");
         let value: Value = serde_json::from_str(val_str)
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
-        if let Err(e) = check_value_for_match(
-            &value,
-            &row,
-            &conf,
-            shard,
-            &obj_tx,
-            &log,
-        ) {
+        if let Err(e) =
+            check_value_for_match(&value, &row, &conf, shard, &obj_tx, &log)
+        {
             return Err(e);
         }
     }
@@ -141,14 +139,18 @@ fn check_value_for_match(
 
     trace!(log, "sharkspotter checking {}", obj_id);
     match conf.clone().filter_type {
-        config::FilterType::Shark(filter_sharks)  => {
-            sharks
-                .iter()
-                .filter(|s| filter_sharks.contains(&s.manta_storage_id))
-                .try_for_each(|s| {
-                    send_matching_object(row, &s.manta_storage_id, shard, &obj_tx, log)
-                })
-        },
+        config::FilterType::Shark(filter_sharks) => sharks
+            .iter()
+            .filter(|s| filter_sharks.contains(&s.manta_storage_id))
+            .try_for_each(|s| {
+                send_matching_object(
+                    row,
+                    &s.manta_storage_id,
+                    shard,
+                    &obj_tx,
+                    log,
+                )
+            }),
         config::FilterType::NumCopies(num_copies) => {
             if sharks.len() as u32 > num_copies {
                 send_matching_object(row, "", shard, &obj_tx, log)

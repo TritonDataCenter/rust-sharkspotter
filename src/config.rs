@@ -21,7 +21,6 @@ pub enum FilterType {
     NumCopies(u32),
 }
 
-
 #[derive(Clone)]
 pub struct Config {
     pub min_shard: u32,
