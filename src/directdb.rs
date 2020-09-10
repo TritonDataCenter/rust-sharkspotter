@@ -158,6 +158,9 @@ fn check_value_for_match(
                 Ok(())
             }
         }
+        config::FilterType::NoFilter => {
+            send_matching_object(row, "", shard, &obj_tx, log)
+        }
     }
 }
 

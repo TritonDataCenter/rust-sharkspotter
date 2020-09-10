@@ -19,6 +19,7 @@ const MAX_THREADS: usize = 100;
 pub enum FilterType {
     Shark(Vec<String>),
     NumCopies(u32),
+    NoFilter,
 }
 
 #[derive(Clone)]
@@ -113,7 +114,7 @@ impl<'a, 'b> Config {
                 .long("shark")
                 .value_name("STORAGE_ID")
                 .help("Find objects that belong to this shark")
-                .required(true)
+                .required_unless_all(&["copies_filter", "no_filter"])
                 .number_of_values(1) // only 1 value per occurrence
                 .multiple(true) // allow multiple occurrences
                 .takes_value(true))
@@ -172,10 +173,14 @@ impl<'a, 'b> Config {
                 .short("-C")
                 .long("copies_filter")
                 .value_name("NUM_COPIES")
-                .required(true)
                 .help("only retain objects that are on more than NUM_COPIES \
                 sharks")
                 .takes_value(true))
+            .arg(Arg::with_name("no_filter")
+                .short("-N")
+                .long("no_filter")
+                .help("scan all objects without filtering")
+                .takes_value(false))
             .arg(Arg::with_name("log_level")
                 .short("l")
                 .long("log_level")
