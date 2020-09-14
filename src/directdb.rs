@@ -44,19 +44,10 @@ use crate::{
 //  manta      | type        | text
 #[derive(Deserialize, Serialize)]
 struct MorayMantaBucketObject {
-    _id: i64,
-    _txn_snap: Option<i32>,
     _key: String,
     _value: String,
     _etag: String,
-    _mtime: i64,
-    _vnode: i64,
-    dirname: String,
-    name: String,
-    owner: String,
     objectid: String,
-    #[serde(alias = "type")]
-    record_type: String,
 }
 
 pub async fn get_objects_from_shard(
