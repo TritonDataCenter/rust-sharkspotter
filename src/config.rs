@@ -19,7 +19,7 @@ const MAX_THREADS: usize = 100;
 pub enum FilterType {
     Shark(Vec<String>),
     NumCopies(u32),
-    NoFilter,
+    Duplicates,
 }
 
 #[derive(Clone)]
@@ -39,6 +39,7 @@ pub struct Config {
     pub multithreaded: bool,
     pub max_threads: usize,
     pub direct_db: bool,
+    pub db_name: String,
     pub log_level: Level,
 }
 
@@ -60,6 +61,7 @@ impl Default for Config {
             multithreaded: false,
             max_threads: 50,
             direct_db: false,
+            db_name: "".to_string(),
             log_level: Level::Debug,
         }
     }
@@ -114,7 +116,7 @@ impl<'a, 'b> Config {
                 .long("shark")
                 .value_name("STORAGE_ID")
                 .help("Find objects that belong to this shark")
-                .required_unless_all(&["copies_filter", "no_filter"])
+                .required_unless_all(&["copies_filter", "duplicates"])
                 .number_of_values(1) // only 1 value per occurrence
                 .multiple(true) // allow multiple occurrences
                 .takes_value(true))
@@ -176,9 +178,8 @@ impl<'a, 'b> Config {
                 .help("only retain objects that are on more than NUM_COPIES \
                 sharks")
                 .takes_value(true))
-            .arg(Arg::with_name("no_filter")
-                .short("-N")
-                .long("no_filter")
+            .arg(Arg::with_name("duplicates")
+                .long("duplicates")
                 .help("scan all objects without filtering")
                 .takes_value(false))
             .arg(Arg::with_name("log_level")

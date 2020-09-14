@@ -65,6 +65,8 @@ pub async fn get_objects_from_shard(
     log: Logger,
     obj_tx: crossbeam::Sender<SharkspotterMessage>,
 ) -> Result<(), Error> {
+    let local_db_conn =
+        crate::db::connect_db(&conf.db_name).expect("Connect to local db");
     let shard_host_name =
         format!("{}.rebalancer-postgres.{}", shard, conf.domain);
 
@@ -115,15 +117,26 @@ pub async fn get_objects_from_shard(
         let val_str: &str = row.get("_value");
         let value: Value = serde_json::from_str(val_str)
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
-        if let Err(e) =
-            check_value_for_match(&value, &row, &conf, shard, &obj_tx, &log)
-        {
+        if let Err(e) = check_value_for_match(
+            &value,
+            &row,
+            &conf,
+            shard,
+            &obj_tx,
+            &log,
+            &local_db_conn,
+        ) {
             return Err(e);
         }
     }
 
     Ok(())
 }
+
+// Move me:
+use diesel::pg::PgConnection;
+use diesel::prelude::*;
+use diesel::result::{DatabaseErrorKind, Error::DatabaseError};
 
 fn check_value_for_match(
     value: &Value,
@@ -132,6 +145,7 @@ fn check_value_for_match(
     shard: u32,
     obj_tx: &crossbeam_channel::Sender<SharkspotterMessage>,
     log: &Logger,
+    local_db_conn: &PgConnection,
 ) -> Result<(), Error> {
     let obj_id = object_id_from_manta_obj(value)
         .map_err(|e| Error::new(ErrorKind::Other, e))?;
@@ -158,9 +172,210 @@ fn check_value_for_match(
                 Ok(())
             }
         }
-        config::FilterType::NoFilter => {
-            send_matching_object(row, "", shard, &obj_tx, log)
+        config::FilterType::Duplicates => {
+            check_for_duplicate(row, shard, log, local_db_conn)
         }
+    }
+}
+
+table! {
+    use diesel::sql_types::{Text, Array, Integer};
+    mantastubs(id) {
+        id -> Text,
+        key -> Text,
+        etag -> Text,
+        shards -> Array<Integer>,
+    }
+}
+
+#[derive(Clone, Debug, Insertable, AsChangeset, Queryable, Serialize)]
+#[table_name = "mantastubs"]
+struct MantaStub {
+    id: String,
+    key: String,
+    etag: String,
+    shards: Vec<i32>,
+}
+
+table! {
+    use diesel::sql_types::{Text, Jsonb};
+    mantaduplicates(id) {
+        id -> Text,
+        key -> Text,
+        object -> Jsonb,
+    }
+}
+
+#[derive(
+    Insertable,
+    Queryable,
+    Identifiable,
+    AsChangeset,
+    AsExpression,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+)]
+#[table_name = "mantaduplicates"]
+struct MantaDuplicate {
+    id: String,
+    key: String,
+    object: Value,
+}
+
+// Save this off.  We need to detect the conflict and insert a record into
+// the duplicate table.
+/*
+   let mut client = pg::Client::connect(
+       "host=localhost user=postgres",
+       pg::NoTls
+   );
+
+   client.execute(
+       "INSERT INTO mantastubs (id, key, etag, shards) \
+       VALUES ($1, $2, $3, $4) \
+       ON CONFLICT (id)\
+       DO UPDATE SET shards = mantastubs.shards || EXCLUDED.shards;
+       ",
+       &[&stub.id, &stub.key, &stub.etag, &stub.shards],
+   ).expect("Upsert error");
+
+*/
+
+// Insert duplicate metadata entry for safe keeping. We ignore conflicts
+// because this table is only populated when the first duplicate is found.
+// If multiple duplicates are found we don't need to update the metadata.  We
+// should have already validated that etags match.
+fn insert_metadata_into_duplicate_table(
+    stub: &MantaStub,
+    manta_value: &Value,
+    log: &Logger,
+    conn: &PgConnection,
+) {
+    use self::mantaduplicates::dsl::mantaduplicates;
+
+    let duplicate = MantaDuplicate {
+        id: stub.id.clone(),
+        key: stub.key.clone(),
+        object: manta_value.to_owned(),
+    };
+
+    match diesel::insert_into(mantaduplicates)
+        .values(duplicate)
+        .execute(conn)
+    {
+        Ok(_) => (),
+        Err(DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => (),
+        Err(e) => {
+            error!(
+                log,
+                "Encountered error while attempting to update duplicate \
+                 table {}",
+                e.to_string()
+            );
+            panic!("Duplicate insertion error");
+        }
+    }
+}
+
+// Diesel doesn't have the ability to concatenate arrays yet.  Also since we
+// are multi-threaded we can't do two queries... one to get the array, and
+// one to set it to a concatenated version. So we need to use the postgres
+// crate here to issue the update query directly.
+fn update_stub(stub: &MantaStub) {
+    let mut client =
+        pg::Client::connect("host=localhost user=postgres", pg::NoTls).expect
+        ("PG Connection error");
+
+
+    // If this fails we might lose track of data, so panic.
+    client.execute(
+        "UPDATE mantastubs SET shards = mantastubs.shards || $2 WHERE id = $1;",
+        &[&stub.id, &stub.shards],
+    ).expect("Upsert error");
+}
+
+// We've found a duplicate.  This function needs to do 2 things.
+// 1. Get the current stub etag and compare it to the current etag.  If they
+// don't match we have a problem.
+// 2. If the etags do match put the duplicate in a database by itself, and
+// update the stub's etags.
+fn handle_duplicate(
+    stub: &MantaStub,
+    manta_value: &Value,
+    log: &Logger,
+    conn: &PgConnection,
+) {
+    use self::mantastubs::dsl::{id as stub_id, mantastubs};
+
+    let resident_stubs: Vec<MantaStub> = mantastubs
+        .filter(stub_id.eq(&stub.id))
+        .load::<MantaStub>(conn)
+        .expect("Attempt to get stub that does not exist");
+
+    assert_eq!(resident_stubs.len(), 1, "expected 1 manta stub");
+
+    let resident_etag = resident_stubs[0].etag.clone();
+    if stub.etag != resident_etag {
+        error!(
+            log,
+            "Found two metadata entries with different etags for {:#?}", stub
+        );
+        return;
+    }
+
+    update_stub(stub);
+    insert_metadata_into_duplicate_table(stub, manta_value, log, conn);
+}
+
+fn insert_stub(
+    stub: &MantaStub,
+    conn: &PgConnection,
+) -> diesel::result::QueryResult<usize> {
+    use self::mantastubs::dsl::mantastubs;
+
+    diesel::insert_into(mantastubs).values(stub).execute(conn)
+}
+
+fn check_for_duplicate(
+    row: &Row,
+    shard: u32,
+    log: &Logger,
+    conn: &PgConnection,
+) -> Result<(), Error> {
+    let moray_object: MorayMantaBucketObject = serde_postgres::from_row(&row)
+        .map_err(|e| {
+        error!(
+            log,
+            "Error deserializing record as moray manta object: {}", e
+        );
+        Error::new(ErrorKind::Other, e)
+    })?;
+
+    let etag = moray_object._etag.clone();
+    let id = moray_object.objectid;
+    let manta_value_str = moray_object._value.as_str();
+    let manta_value: Value = serde_json::from_str(manta_value_str)
+        .map_err(|e| Error::new(ErrorKind::Other, e))?;
+
+    let key = moray_object._key;
+    let shards = vec![shard as i32];
+
+    let stub = MantaStub {
+        id,
+        key,
+        etag,
+        shards,
+    };
+
+    match insert_stub(&stub, conn) {
+        Err(DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
+            handle_duplicate(&stub, &manta_value, log, conn);
+            Ok(())
+        }
+        Ok(_) => Ok(()),
+        _ => panic!("Unknown database error"),
     }
 }
 

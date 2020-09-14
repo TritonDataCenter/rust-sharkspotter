@@ -6,6 +6,8 @@ edition = "2018"
 
 [dependencies]
 assert_cli = "0.6.0"
+diesel = { version = "1.4.3", features = ["postgres", "serde_json"] }
+
 
 serde = { version = "1.0.115", features = ["derive"] }
 serde_json = "1.0.57"
@@ -30,6 +32,8 @@ serde_postgres = "0.2.0"
 unicode-normalization = "=0.1.5"
 crossbeam-channel = "0.4.2"
 threadpool = "1.8.1"
+pg = {version = "0.17.5", package = "postgres"}
+chrono = "0.4.15"
 
 [patch.crates-io]
 # We require the use of certain constructs which unfortunately were not

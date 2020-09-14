@@ -8,6 +8,7 @@
  * Copyright 2020 Joyent, Inc.
  */
 
+use chrono::{DateTime, Utc};
 /// Run sharkspotter as a commandline tool.
 ///
 /// By default sharkspotter will place the manta object metadata into a file
@@ -19,7 +20,7 @@
 ///
 use crossbeam_channel::{self, Receiver, Sender};
 use serde_json::Value;
-use sharkspotter::config::Config;
+use sharkspotter::config::{self, Config};
 use sharkspotter::{util, SharkspotterMessage};
 use slog::{trace, Logger};
 use std::collections::HashMap;
@@ -188,6 +189,33 @@ fn run_with_user_file(
     }
 }
 
+fn create_mantastub_database(conf: &mut Config) -> Result<(), String> {
+    let now: DateTime<Utc> = Utc::now();
+    let db_name = now.format("%Y%m%dT%H%M%S").to_string();
+
+    println!("Creating database {}", db_name);
+    conf.db_name = db_name;
+
+    let conn = sharkspotter::db::create_and_connect_db(&conf.db_name)
+        .expect("Could not create database");
+
+    sharkspotter::db::create_tables(&conn)
+}
+
+fn run_duplicate_check(mut conf: Config, log: Logger) -> Result<(), Error> {
+    // Hack.  We don't use crossbeam here, and we want to simply do the
+    // duplicate check in directdb, so this is not really needed.  If this
+    // were going to be more than a run once tool we would refactor.
+
+    let (obj_tx, _) = crossbeam_channel::bounded(1);
+
+    create_mantastub_database(&mut conf).map_err(|e| {
+        Error::new(ErrorKind::Other, e)
+    })?;
+
+    sharkspotter::run_multithreaded(&conf, log, obj_tx)
+}
+
 fn main() -> Result<(), Error> {
     let conf = Config::from_args().unwrap_or_else(|err| {
         eprintln!("Error parsing args: {}", err);
@@ -197,10 +225,14 @@ fn main() -> Result<(), Error> {
     let _guard = util::init_global_logger(Some(conf.log_level));
     let log = slog_scope::logger();
 
-    let filename = conf.output_file.clone();
+    if let config::FilterType::Duplicates = conf.filter_type  {
+        run_duplicate_check(conf, log)
+    } else {
+        let filename = conf.output_file.clone();
 
-    match filename {
-        Some(fname) => run_with_user_file(fname, conf, log),
-        None => run_with_file_map(conf, log),
+        match filename {
+            Some(fname) => run_with_user_file(fname, conf, log),
+            None => run_with_file_map(conf, log),
+        }
     }
 }
