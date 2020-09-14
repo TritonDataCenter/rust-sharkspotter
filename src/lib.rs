@@ -553,16 +553,19 @@ fn validate_sharks(conf: &config::Config, log: &Logger) -> Result<(), Error> {
 /// for a given moray bucket (which is always "manta"), and then querying for
 /// entries in a user configurable chunk size.
 pub fn run<F>(
-    config: &config::Config,
+    configuration: &config::Config,
     log: Logger,
     mut handler: F,
 ) -> Result<(), Error>
 where
     F: FnMut(Value, &str, &str, u32) -> Result<(), Error>,
 {
-    let mut conf = config.clone();
-    shark_fix_common(&mut conf, &log);
-    validate_sharks(&conf, &log)?;
+    let mut conf = configuration.clone();
+
+    if let config::FilterType::Shark(_) = conf.filter_type {
+        shark_fix_common(&mut conf, &log);
+        validate_sharks(&conf, &log)?;
+    }
 
     for i in conf.min_shard..=conf.max_shard {
         let moray_host = format!("{}.moray.{}", i, conf.domain);
@@ -691,8 +694,10 @@ pub fn run_multithreaded(
 
     let pool = ThreadPool::with_name("shard_scanner".into(), conf.max_threads);
 
-    shark_fix_common(&mut conf, &log);
-    validate_sharks(&conf, &log)?;
+    if let config::FilterType::Shark(_) = conf.filter_type {
+        shark_fix_common(&mut conf, &log);
+        validate_sharks(&conf, &log)?;
+    }
 
     for shard in conf.min_shard..=conf.max_shard {
         if conf.direct_db {

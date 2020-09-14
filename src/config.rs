@@ -116,7 +116,7 @@ impl<'a, 'b> Config {
                 .long("shark")
                 .value_name("STORAGE_ID")
                 .help("Find objects that belong to this shark")
-                .required_unless_all(&["copies_filter", "duplicates"])
+                .required_unless_one(&["copies_filter", "duplicates"])
                 .number_of_values(1) // only 1 value per occurrence
                 .multiple(true) // allow multiple occurrences
                 .takes_value(true))
@@ -243,7 +243,7 @@ impl<'a, 'b> Config {
             config.log_level = parse_log_level(&matches)?;
         }
 
-        config.domain = matches.value_of("domain").unwrap().to_string();
+        config.domain = matches.value_of("domain").expect("domain").to_string();
 
         if matches.is_present("copies_filter") {
             config.sharks = vec![];
@@ -253,11 +253,13 @@ impl<'a, 'b> Config {
                 .parse::<u32>()
                 .expect("parse copies filter");
             config.filter_type = FilterType::NumCopies(config.copies_filter);
+        } else if matches.is_present("duplicates") {
+            config.filter_type = FilterType::Duplicates;
         } else {
             config.copies_filter = 0;
             config.sharks = matches
                 .values_of("shark")
-                .unwrap()
+                .expect("sharks")
                 .map(String::from)
                 .collect();
             config.filter_type = FilterType::Shark(config.sharks.clone());

@@ -209,9 +209,8 @@ fn run_duplicate_check(mut conf: Config, log: Logger) -> Result<(), Error> {
 
     let (obj_tx, _) = crossbeam_channel::bounded(1);
 
-    create_mantastub_database(&mut conf).map_err(|e| {
-        Error::new(ErrorKind::Other, e)
-    })?;
+    create_mantastub_database(&mut conf)
+        .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
     sharkspotter::run_multithreaded(&conf, log, obj_tx)
 }
@@ -225,7 +224,7 @@ fn main() -> Result<(), Error> {
     let _guard = util::init_global_logger(Some(conf.log_level));
     let log = slog_scope::logger();
 
-    if let config::FilterType::Duplicates = conf.filter_type  {
+    if let config::FilterType::Duplicates = conf.filter_type {
         run_duplicate_check(conf, log)
     } else {
         let filename = conf.output_file.clone();

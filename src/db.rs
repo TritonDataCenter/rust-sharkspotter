@@ -25,6 +25,7 @@ pub fn create_tables(conn: &PgConnection) -> Result<(), String> {
         id TEXT PRIMARY KEY,
         key TEXT,
         etag TEXT,
+        duplicate BOOLEAN,
         shards Int[]
     );";
 

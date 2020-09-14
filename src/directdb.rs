@@ -179,11 +179,12 @@ fn check_value_for_match(
 }
 
 table! {
-    use diesel::sql_types::{Text, Array, Integer};
+    use diesel::sql_types::{Text, Array, Integer, Bool};
     mantastubs(id) {
         id -> Text,
         key -> Text,
         etag -> Text,
+        duplicate -> Bool,
         shards -> Array<Integer>,
     }
 }
@@ -194,6 +195,7 @@ struct MantaStub {
     id: String,
     key: String,
     etag: String,
+    duplicate: bool,
     shards: Vec<i32>,
 }
 
@@ -285,13 +287,13 @@ fn insert_metadata_into_duplicate_table(
 // crate here to issue the update query directly.
 fn update_stub(stub: &MantaStub) {
     let mut client =
-        pg::Client::connect("host=localhost user=postgres", pg::NoTls).expect
-        ("PG Connection error");
-
+        pg::Client::connect("host=localhost user=postgres", pg::NoTls)
+            .expect("PG Connection error");
 
     // If this fails we might lose track of data, so panic.
     client.execute(
-        "UPDATE mantastubs SET shards = mantastubs.shards || $2 WHERE id = $1;",
+        "UPDATE mantastubs SET duplicate = 'yes', shards = mantastubs.shards \
+        || $2 WHERE id = $1;",
         &[&stub.id, &stub.shards],
     ).expect("Upsert error");
 }
@@ -366,6 +368,7 @@ fn check_for_duplicate(
         id,
         key,
         etag,
+        duplicate: false,
         shards,
     };
 
