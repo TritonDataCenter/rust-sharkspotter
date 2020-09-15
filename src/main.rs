@@ -8,6 +8,7 @@
  * Copyright 2020 Joyent, Inc.
  */
 
+use chrono::{DateTime, Utc};
 /// Run sharkspotter as a commandline tool.
 ///
 /// By default sharkspotter will place the manta object metadata into a file
@@ -20,7 +21,7 @@
 use crossbeam_channel::{self, Receiver, Sender};
 use serde_json::Value;
 use sharkspotter::config::Config;
-use sharkspotter::{util, SharkspotterMessage};
+use sharkspotter::{duplicate, util, SharkspotterMessage};
 use slog::{trace, Logger};
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
@@ -172,6 +173,53 @@ fn run_with_user_file(
     }
 }
 
+fn create_mantastub_database(conf: &mut Config) -> Result<(), String> {
+    let now: DateTime<Utc> = Utc::now();
+    let db_name = now.format("%Y%m%dT%H%M%S").to_string();
+
+    println!("Creating database {}", db_name);
+    conf.db_name = db_name;
+
+    let conn = sharkspotter::db::create_and_connect_db(&conf.db_name)
+        .expect("Could not create database");
+
+    sharkspotter::db::create_tables(&conn)
+}
+
+fn run_duplicate_check(mut conf: Config, log: Logger) -> Result<(), Error> {
+    // Hack.  We need the channel to send different info, but the rest of the
+    // code is built to only handle certain messages.
+    let (dup_tx, dup_rx) = crossbeam_channel::bounded(10);
+    let mut handles = vec![];
+
+    create_mantastub_database(&mut conf)
+        .map_err(|e| Error::new(ErrorKind::Other, e))?;
+
+    for i in 0..10 {
+        let th_dup_rx = dup_rx.clone();
+        let th_conf = conf.clone();
+        let th_log = log.clone();
+        handles.push(
+            thread::Builder::new()
+                .name(format!("dup_handler_{}", i))
+                .spawn(move || {
+                    duplicate::handle_duplicate_thread(
+                        th_conf, th_dup_rx, th_log,
+                    )
+                })
+                .expect("spawn duplicate handler"),
+        );
+    }
+
+    let ret = duplicate::run_duplicate_detector(&conf, log, dup_tx);
+
+    for h in handles {
+        h.join().expect("join handler thread");
+    }
+
+    ret
+}
+
 fn main() -> Result<(), Error> {
     let conf = Config::from_args().unwrap_or_else(|err| {
         eprintln!("Error parsing args: {}", err);
@@ -181,10 +229,14 @@ fn main() -> Result<(), Error> {
     let _guard = util::init_global_logger(Some(conf.log_level));
     let log = slog_scope::logger();
 
-    let filename = conf.output_file.clone();
+    if conf.duplicate_detect {
+        run_duplicate_check(conf, log)
+    } else {
+        let filename = conf.output_file.clone();
 
-    match filename {
-        Some(fname) => run_with_user_file(fname, conf, log),
-        None => run_with_file_map(conf, log),
+        match filename {
+            Some(fname) => run_with_user_file(fname, conf, log),
+            None => run_with_file_map(conf, log),
+        }
     }
 }

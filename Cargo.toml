@@ -24,6 +24,11 @@ tokio = {version = "0.2.22", features = ["full"]}
 futures = "0.3.5"
 serde_postgres = "0.2.0"
 
+diesel = { version = "1.4.3", features = ["postgres", "serde_json"] }
+pg = {version = "0.17.5", package = "postgres"}
+chrono = "0.4.15"
+
+
 # We don't use this directly, but gotham pulls it in via the rust-url crate.
 # If we don't specify the exact version here cargo will bring in a newer version
 # that is not compatible with rust 1.35.

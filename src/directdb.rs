@@ -46,9 +46,11 @@ use crate::{
 //  manta      | objectid    | text
 //  manta      | type        | text
 #[derive(Deserialize, Serialize)]
-struct MorayMantaBucketObjectEssential {
-    _value: String,
-    _etag: String,
+pub struct MorayMantaBucketObjectEssential {
+    pub _key: String,
+    pub _value: String,
+    pub _etag: String,
+    pub objectid: String,
 }
 
 pub async fn get_objects_from_shard(

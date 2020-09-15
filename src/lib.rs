@@ -47,8 +47,13 @@
 // }
 
 pub mod config;
+pub mod db;
 pub mod directdb;
+pub mod duplicate;
 pub mod util;
+
+#[macro_use]
+extern crate diesel;
 
 use lazy_static::lazy_static;
 use libmanta::moray::MantaObjectShark;

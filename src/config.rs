@@ -30,6 +30,8 @@ pub struct Config {
     pub multithreaded: bool,
     pub max_threads: usize,
     pub direct_db: bool,
+    pub duplicate_detect: bool,
+    pub db_name: String,
     pub log_level: Level,
 }
 
@@ -49,6 +51,8 @@ impl Default for Config {
             multithreaded: false,
             max_threads: 50,
             direct_db: false,
+            duplicate_detect: false,
+            db_name: "".to_string(),
             log_level: Level::Debug,
         }
     }
@@ -103,7 +107,7 @@ impl<'a, 'b> Config {
                 .long("shark")
                 .value_name("STORAGE_ID")
                 .help("Find objects that belong to this shark")
-                .required(true)
+                .required_unless_one(&["copies_filter", "duplicates"])
                 .number_of_values(1) // only 1 value per occurrence
                 .multiple(true) // allow multiple occurrences
                 .takes_value(true))
@@ -157,6 +161,10 @@ impl<'a, 'b> Config {
                 .short("-D")
                 .long("direct_db")
                 .help("use direct DB access instead of moray")
+                .takes_value(false))
+            .arg(Arg::with_name("duplicates")
+                .long("duplicates")
+                .help("scan all objects without filtering")
                 .takes_value(false))
             .arg(Arg::with_name("log_level")
                 .short("l")
@@ -220,11 +228,16 @@ impl<'a, 'b> Config {
         }
 
         config.domain = matches.value_of("domain").unwrap().to_string();
-        config.sharks = matches
-            .values_of("shark")
-            .unwrap()
-            .map(String::from)
-            .collect();
+
+        if matches.is_present("duplicates") {
+            config.duplicate_detect = true;
+        } else {
+            config.sharks = matches
+                .values_of("shark")
+                .unwrap()
+                .map(String::from)
+                .collect();
+        }
 
         if let Err(e) = validate_config(&mut config) {
             eprintln!("{}", e);
