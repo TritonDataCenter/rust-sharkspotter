@@ -414,7 +414,7 @@ mod test {
     use serde_json::json;
 
     #[test]
-    fn test_update_stub() {
+    fn test_duplicate_insertion() {
         use self::mantaduplicates::dsl::mantaduplicates;
         use self::mantastubs::dsl::{id as stub_id, mantastubs};
 
