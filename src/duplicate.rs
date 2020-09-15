@@ -8,7 +8,7 @@
  * Copyright 2020 Joyent, Inc.
  */
 
-use crate::config::{validate_config, Config};
+use crate::config::Config;
 use crate::directdb::MorayMantaBucketObjectEssential;
 use crossbeam_channel as crossbeam;
 use diesel::pg::PgConnection;
@@ -18,7 +18,7 @@ use futures::{pin_mut, TryStreamExt};
 use lazy_static::lazy_static;
 use serde::Serialize;
 use serde_json::Value;
-use slog::{debug, error, info, warn, Logger};
+use slog::{debug, error, info, Logger};
 use std::io::{Error, ErrorKind};
 use std::sync::Mutex;
 use threadpool::ThreadPool;
@@ -87,10 +87,7 @@ pub fn run_duplicate_detector(
     log: Logger,
     dup_tx: crossbeam_channel::Sender<DuplicateInfo>,
 ) -> Result<(), Error> {
-    let mut conf = configuration.clone();
-    if let Err(e) = validate_config(&mut conf) {
-        warn!(log, "{}", e);
-    }
+    let conf = configuration.clone();
 
     let pool = ThreadPool::with_name("shard_scanner".into(), conf.max_threads);
 
