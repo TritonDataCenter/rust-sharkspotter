@@ -77,6 +77,12 @@ struct IdRet {
 }
 
 #[derive(Debug)]
+pub struct DuplicateInfo {
+    stub: directdb::MantaStub,
+    manta_value: Value,
+}
+
+#[derive(Debug)]
 pub struct SharkspotterMessage {
     pub manta_value: Value,
     pub etag: String,
@@ -678,6 +684,55 @@ fn run_direct_db_shard_thread(
         }
     });
 }
+
+// XXX: ugh copied code....
+/*
+pub fn run_duplicate_checker(
+    config: &config::Config,
+    log: Logger,
+    obj_tx: crossbeam_channel::Sender<DuplicateInfo>,
+) -> Result<(), Error> {
+    let mut conf = config.clone();
+    if let Err(e) = config::validate_config(&mut conf) {
+        warn!(log, "{}", e);
+    }
+
+    let pool = ThreadPool::with_name("shard_scanner".into(), conf.max_threads);
+
+
+    for shard in conf.min_shard..=conf.max_shard {
+        if conf.direct_db {
+            run_direct_db_shard_thread(&pool, shard, &obj_tx, &conf, &log);
+        } else {
+            run_moray_shard_thread(&pool, shard, &obj_tx, &conf, &log)?;
+        }
+    }
+
+    pool.join();
+
+    let mut error_strings = String::new();
+    let error_list = ERROR_LIST.lock().unwrap();
+    for error in error_list.iter() {
+        if error.kind() == ErrorKind::BrokenPipe {
+            continue;
+        }
+        error_strings = format!("{}{}\n", error_strings, error);
+    }
+
+    if !error_strings.is_empty() {
+        let msg = format!(
+            "Sharkspotter encountered the following errors:\n{}",
+            error_strings
+        );
+        return Err(Error::new(ErrorKind::Other, msg));
+    }
+
+    Ok(())
+
+
+}
+
+ */
 
 /// Same as the regular `run` method, but instead we spawn a new thread per
 /// shard and send the information back to the caller via a crossbeam

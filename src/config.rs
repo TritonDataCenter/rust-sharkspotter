@@ -13,6 +13,8 @@ use slog::Level;
 use std::io::{Error, ErrorKind};
 use std::str::FromStr;
 
+use crate::DuplicateInfo;
+
 const MAX_THREADS: usize = 100;
 
 #[derive(Clone, Debug)]
@@ -40,6 +42,7 @@ pub struct Config {
     pub max_threads: usize,
     pub direct_db: bool,
     pub db_name: String,
+    pub duplicate_object_tx: Option<crossbeam_channel::Sender<DuplicateInfo>>,
     pub log_level: Level,
 }
 
@@ -62,6 +65,7 @@ impl Default for Config {
             max_threads: 50,
             direct_db: false,
             db_name: "".to_string(),
+            duplicate_object_tx: None,
             log_level: Level::Debug,
         }
     }

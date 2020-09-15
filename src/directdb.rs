@@ -12,7 +12,7 @@ use crossbeam_channel as crossbeam;
 use futures::{pin_mut, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
-use slog::{debug, error, trace, warn, Logger};
+use slog::{debug, error, info, trace, warn, Logger};
 use std::io::{Error, ErrorKind};
 use tokio_postgres::{NoTls, Row};
 
@@ -58,6 +58,7 @@ pub async fn get_objects_from_shard(
 ) -> Result<(), Error> {
     let local_db_conn =
         crate::db::connect_db(&conf.db_name).expect("Connect to local db");
+    let dup_tx = conf.duplicate_object_tx.clone();
     let shard_host_name =
         format!("{}.rebalancer-postgres.{}", shard, conf.domain);
 
@@ -116,6 +117,7 @@ pub async fn get_objects_from_shard(
             &obj_tx,
             &log,
             &local_db_conn,
+            &dup_tx,
         ) {
             return Err(e);
         }
@@ -137,6 +139,7 @@ fn check_value_for_match(
     obj_tx: &crossbeam_channel::Sender<SharkspotterMessage>,
     log: &Logger,
     local_db_conn: &PgConnection,
+    dup_tx: &Option<crossbeam_channel::Sender<crate::DuplicateInfo>>,
 ) -> Result<(), Error> {
     let obj_id = object_id_from_manta_obj(value)
         .map_err(|e| Error::new(ErrorKind::Other, e))?;
@@ -164,7 +167,7 @@ fn check_value_for_match(
             }
         }
         config::FilterType::Duplicates => {
-            check_for_duplicate(row, shard, log, local_db_conn)
+            check_for_duplicate(row, shard, log, local_db_conn, dup_tx)
         }
     }
 }
@@ -182,7 +185,7 @@ table! {
 
 #[derive(Clone, Debug, Insertable, AsChangeset, Queryable, Serialize)]
 #[table_name = "mantastubs"]
-struct MantaStub {
+pub struct MantaStub {
     id: String,
     key: String,
     etag: String,
@@ -289,6 +292,33 @@ fn update_stub(stub: &MantaStub) {
     ).expect("Upsert error");
 }
 
+pub fn handle_duplicate_thread(
+    conf: Config,
+    obj_rx: crossbeam_channel::Receiver<crate::DuplicateInfo>,
+    log: Logger,
+) {
+    let conn =
+        crate::db::connect_db(&conf.db_name).expect("Connect to local db");
+
+    loop {
+        match obj_rx.recv() {
+            Ok(dup_info) => {
+                handle_duplicate(
+                    &dup_info.stub,
+                    &dup_info.manta_value,
+                    &log,
+                    &conn,
+                );
+            }
+            Err(e) => {
+                let msg = format!("Exiting duplicate handler thread: {}", e);
+                info!(log, "{}", msg);
+                break;
+            }
+        }
+    }
+}
+
 // We've found a duplicate.  This function needs to do 2 things.
 // 1. Get the current stub etag and compare it to the current etag.  If they
 // don't match we have a problem.
@@ -336,6 +366,7 @@ fn check_for_duplicate(
     shard: u32,
     log: &Logger,
     conn: &PgConnection,
+    dup_tx: &Option<crossbeam_channel::Sender<crate::DuplicateInfo>>,
 ) -> Result<(), Error> {
     let moray_object: MorayMantaBucketObject = serde_postgres::from_row(&row)
         .map_err(|e| {
@@ -357,7 +388,7 @@ fn check_for_duplicate(
 
     let stub = MantaStub {
         id,
-        key,
+        key: key.clone(),
         etag,
         duplicate: false,
         shards,
@@ -365,7 +396,20 @@ fn check_for_duplicate(
 
     match insert_stub(&stub, conn) {
         Err(DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
-            handle_duplicate(&stub, &manta_value, log, conn);
+            info!(log, "Found duplicate {}", key);
+            let dup_info = crate::DuplicateInfo {
+                stub: stub.clone(),
+                manta_value: manta_value.clone(),
+            };
+
+            dup_tx
+                .clone()
+                .expect("dup_tx option")
+                .send(dup_info)
+                .expect(&format!(
+                    "Error sending duplicate info for shard: {}",
+                    shard
+                ));
             Ok(())
         }
         Ok(_) => Ok(()),

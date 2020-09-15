@@ -203,16 +203,40 @@ fn create_mantastub_database(conf: &mut Config) -> Result<(), String> {
 }
 
 fn run_duplicate_check(mut conf: Config, log: Logger) -> Result<(), Error> {
-    // Hack.  We don't use crossbeam here, and we want to simply do the
-    // duplicate check in directdb, so this is not really needed.  If this
-    // were going to be more than a run once tool we would refactor.
-
+    // Hack.  We need the channel to send different info, but the rest of the
+    // code is built to only handle certain messages.
+    let (dup_tx, dup_rx) = crossbeam_channel::bounded(10);
     let (obj_tx, _) = crossbeam_channel::bounded(1);
+    let mut handles = vec![];
+
+    conf.duplicate_object_tx = Some(dup_tx);
 
     create_mantastub_database(&mut conf)
         .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
-    sharkspotter::run_multithreaded(&conf, log, obj_tx)
+    for i in 0..10 {
+        let th_dup_rx = dup_rx.clone();
+        let th_conf = conf.clone();
+        let th_log = log.clone();
+        handles.push(
+            thread::Builder::new()
+                .name(format!("dup_handler_{}", i))
+                .spawn(move || {
+                    sharkspotter::directdb::handle_duplicate_thread(
+                        th_conf, th_dup_rx, th_log,
+                    )
+                })
+                .expect("spawn duplicate handler"),
+        );
+    }
+
+    let ret = sharkspotter::run_multithreaded(&conf, log, obj_tx);
+
+    for h in handles {
+        h.join().expect("join handler thread");
+    }
+
+    ret
 }
 
 fn main() -> Result<(), Error> {
