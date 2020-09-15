@@ -417,7 +417,8 @@ where
     let mut remaining = largest_id - conf.begin + 1;
     assert!(largest_id + 1 >= remaining);
 
-    if end_id > conf.end {
+    // only clamp end value if `-e` is explicitly given
+    if conf.end > 0 && end_id > conf.end {
         end_id = conf.end;
     }
 
@@ -709,9 +710,7 @@ pub fn run_multithreaded(
     obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
 ) -> Result<(), Error> {
     let mut conf = config.clone();
-    if let Err(e) = config::validate_config(&mut conf) {
-        warn!(log, "{}", e);
-    }
+    config::normalize_config(&mut conf);
 
     let pool = ThreadPool::with_name("shard_scanner".into(), conf.max_threads);
 
