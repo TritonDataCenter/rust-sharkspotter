@@ -47,3 +47,10 @@ pub fn create_tables(conn: &PgConnection) -> Result<(), String> {
 
     Ok(())
 }
+
+pub fn connect_or_create_db(db_name: &str) -> Result<PgConnection, String> {
+    match connect_db(db_name) {
+        Ok(conn) => Ok(conn),
+        Err(_) => create_and_connect_db(db_name),
+    }
+}

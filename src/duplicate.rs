@@ -269,16 +269,10 @@ fn check_for_duplicate(
     match insert_stub(&stub, conn) {
         Err(DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
             info!(log, "Found duplicate {}", key);
-            let dup_info = DuplicateInfo {
-                stub,
-                manta_value,
-            };
+            let dup_info = DuplicateInfo { stub, manta_value };
 
             dup_tx.send(dup_info).unwrap_or_else(|_| {
-                panic!(
-                    "Error sending duplicate info for shard: {}",
-                    shard
-                )
+                panic!("Error sending duplicate info for shard: {}", shard)
             });
             Ok(())
         }
@@ -409,5 +403,92 @@ fn insert_metadata_into_duplicate_table(
             );
             panic!("Duplicate insertion error");
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::db::{connect_or_create_db, create_tables};
+    use crate::util;
+    use serde_json::json;
+
+    #[test]
+    fn test_update_stub() {
+        use self::mantaduplicates::dsl::mantaduplicates;
+        use self::mantastubs::dsl::{id as stub_id, mantastubs};
+
+        let _guard = util::init_global_logger(None);
+        let log = slog_scope::logger();
+        let db_name = "test_update".to_string();
+        let mut conf = Config::default();
+
+        let id = "id1".to_string();
+        let key = "key1".to_string();
+        let etag = "etag1".to_string();
+        let duplicate = false;
+        let shards = vec![1];
+        let mut expected_shards = vec![1, 2];
+
+        let stub = MantaStub {
+            id: id.clone(),
+            key: key.clone(),
+            etag: etag.clone(),
+            duplicate,
+            shards,
+        };
+
+        conf.db_name = db_name;
+
+        let conn = connect_or_create_db(&conf.db_name).expect("create db");
+        for t in ["mantastubs", "mantaduplicates"].iter() {
+            let drop_query = format!("DROP TABLE {}", t);
+            let _ = conn.execute(&drop_query); // ignore error
+        }
+
+        create_tables(&conn).expect("create tables");
+        insert_stub(&stub, &conn).expect("insert stub");
+
+        let new_stub = MantaStub {
+            id,
+            key,
+            etag,
+            duplicate,
+            shards: vec![2],
+        };
+
+        let manta_value = json!({
+            "somekey": "some value"
+        });
+
+        let dup_info = DuplicateInfo {
+            stub: new_stub,
+            manta_value,
+        };
+
+        handle_duplicate(&conf, dup_info, &log, &conn);
+
+        let stubs: Vec<MantaStub> = mantastubs
+            .filter(stub_id.eq(&stub.id))
+            .load::<MantaStub>(&conn)
+            .expect("Attempt to get stub that does not exist");
+
+        println!("stubs {:#?}", stubs);
+        assert_eq!(stubs.len(), 1);
+
+        let mut found_shards = stubs[0].shards.clone();
+
+        expected_shards.sort();
+        found_shards.sort();
+
+        assert_eq!(expected_shards, found_shards, "expected vs found shards");
+        assert!(stubs[0].duplicate);
+
+        let duplicates: Vec<MantaDuplicate> = mantaduplicates
+            .load::<MantaDuplicate>(&conn)
+            .expect("Attempt to get duplicate that does not exist");
+
+        println!("Duplicates: {:#?}", duplicates);
+        assert_eq!(duplicates.len(), 1);
     }
 }
