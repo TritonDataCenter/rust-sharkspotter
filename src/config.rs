@@ -239,10 +239,6 @@ impl<'a, 'b> Config {
                 .collect();
         }
 
-        if let Err(e) = validate_config(&mut config) {
-            eprintln!("{}", e);
-        }
-
         Ok(config)
     }
 
