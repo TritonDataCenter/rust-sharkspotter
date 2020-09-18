@@ -436,19 +436,6 @@ where
             Err(e) => return Err(e),
         };
 
-        start_id = end_id + 1;
-        if start_id > largest_id {
-            break;
-        }
-
-        end_id = start_id + conf.chunk_size - 1;
-        if end_id > largest_id {
-            end_id = largest_id
-        }
-
-        remaining = largest_id - start_id + 1;
-        assert!(largest_id + 1 >= remaining);
-
         // Find the percent value rounded to the thousand-th of a percent.
         let percent_complete =
             (1.0 - remaining as f64 / largest_id as f64) * 100.0;
@@ -464,6 +451,19 @@ where
             "remaining_count" => remaining,
             "percent_complete" => percent_complete
         );
+
+        start_id = end_id + 1;
+        if start_id > largest_id {
+            break;
+        }
+
+        end_id = start_id + conf.chunk_size - 1;
+        if end_id > largest_id {
+            end_id = largest_id
+        }
+
+        remaining = largest_id - start_id + 1;
+        assert!(largest_id + 1 >= remaining);
     }
 
     Ok(())
