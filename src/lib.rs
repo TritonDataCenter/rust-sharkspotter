@@ -406,13 +406,18 @@ where
 
     let mut start_id = conf.begin;
     let mut end_id = conf.begin + conf.chunk_size - 1;
-    let largest_id = match find_largest_id_value(&log, &mut mclient, id_name) {
+    let mut largest_id = match find_largest_id_value(&log, &mut mclient, id_name) {
         Ok(id) => id,
         Err(e) => {
             error!(&log, "Error finding largest ID: {}, using 0", e);
             0
         }
     };
+
+    // clamp largest_id to conf.end if it is set and less than the largest found
+    if conf.end > 0 && conf.end < largest_id {
+        largest_id = conf.end
+    }
 
     let mut remaining = largest_id - conf.begin + 1;
     assert!(largest_id + 1 >= remaining);
