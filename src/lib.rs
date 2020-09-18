@@ -406,7 +406,7 @@ where
 
     let mut start_id = conf.begin;
     let mut end_id = conf.begin + conf.chunk_size - 1;
-    let largest_id = match find_largest_id_value(&log, &mut mclient, id_name) {
+    let mut largest_id = match find_largest_id_value(&log, &mut mclient, id_name) {
         Ok(id) => id,
         Err(e) => {
             error!(&log, "Error finding largest ID: {}, using 0", e);
@@ -414,10 +414,16 @@ where
         }
     };
 
+    // clamp largest_id to conf.end if it is set and less than the largest found
+    if conf.end > 0 && conf.end < largest_id {
+        largest_id = conf.end
+    }
+
     let mut remaining = largest_id - conf.begin + 1;
     assert!(largest_id + 1 >= remaining);
 
-    if end_id > conf.end {
+    // only clamp end value if `-e` is explicitly given
+    if conf.end > 0 && end_id > conf.end {
         end_id = conf.end;
     }
 
@@ -435,19 +441,6 @@ where
             Err(e) => return Err(e),
         };
 
-        start_id = end_id + 1;
-        if start_id > largest_id {
-            break;
-        }
-
-        end_id = start_id + conf.chunk_size - 1;
-        if end_id > largest_id {
-            end_id = largest_id
-        }
-
-        remaining = largest_id - start_id + 1;
-        assert!(largest_id + 1 >= remaining);
-
         // Find the percent value rounded to the thousand-th of a percent.
         let percent_complete =
             (1.0 - remaining as f64 / largest_id as f64) * 100.0;
@@ -463,6 +456,19 @@ where
             "remaining_count" => remaining,
             "percent_complete" => percent_complete
         );
+
+        start_id = end_id + 1;
+        if start_id > largest_id {
+            break;
+        }
+
+        end_id = start_id + conf.chunk_size - 1;
+        if end_id > largest_id {
+            end_id = largest_id
+        }
+
+        remaining = largest_id - start_id + 1;
+        assert!(largest_id + 1 >= remaining);
     }
 
     Ok(())
@@ -709,9 +715,7 @@ pub fn run_multithreaded(
     obj_tx: crossbeam_channel::Sender<SharkspotterMessage>,
 ) -> Result<(), Error> {
     let mut conf = config.clone();
-    if let Err(e) = config::validate_config(&mut conf) {
-        warn!(log, "{}", e);
-    }
+    config::normalize_config(&mut conf);
 
     let pool = ThreadPool::with_name("shard_scanner".into(), conf.max_threads);
 

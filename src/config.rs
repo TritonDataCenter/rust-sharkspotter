@@ -226,9 +226,7 @@ impl<'a, 'b> Config {
             .map(String::from)
             .collect();
 
-        if let Err(e) = validate_config(&mut config) {
-            eprintln!("{}", e);
-        }
+        normalize_config(&mut config);
 
         Ok(config)
     }
@@ -239,18 +237,19 @@ impl<'a, 'b> Config {
     }
 }
 
-pub fn validate_config(conf: &mut Config) -> Result<(), String> {
-    let mut ret = Ok(());
-
+pub fn normalize_config(conf: &mut Config) {
     if conf.max_threads > MAX_THREADS {
-        ret = Err(format!(
+        eprintln!(
             "Max threads of {} exceeds max.  Setting to {}.",
             conf.max_threads, MAX_THREADS
-        ));
+        );
         conf.max_threads = MAX_THREADS;
     }
 
-    ret
+    if conf.begin > 0 && conf.end > 0 && conf.end < conf.begin {
+        eprintln!("'end' is smaller than 'begin', discard 'end' value given");
+        conf.end = 0;
+    }
 }
 
 #[cfg(test)]
