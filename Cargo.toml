@@ -1,36 +1,39 @@
 [package]
 name = "sharkspotter"
-version = "0.16.5"
+version = "0.16.6"
 authors = ["Rui Loura <rui@joyent.com>", "Jon Anderson <jon.anderson@joyent.com>"]
 edition = "2018"
 
 [dependencies]
 assert_cli = "0.6.0"
-
-serde = { version = "1.0.115", features = ["derive"] }
-serde_json = "1.0.57"
 clap = "2.33.0"
+crossbeam-channel = "0.4.2"
+futures = "0.3.5"
 lazy_static = "1.4.0"
 libmanta = { git = "https://github.com/joyent/rust-libmanta", tag = "v0.7.0" }
 moray = { git = "https://github.com/joyent/rust-moray", tag="v0.11.2" }
+num_cpus = "1.8.0"
+serde = { version = "1.0.115", features = ["derive"] }
+serde_json = "1.0.57"
 slog = "2.5.2"
 slog-bunyan = "2.2.0"
 slog-scope = "4.1.2"
-trust-dns-resolver = "0.11.1"
 slog-term = "2.4.1"
-
-tokio-postgres = { version="0.5.5", features = ["with-serde_json-1"]}
+threadpool = "1.8.1"
 tokio = {version = "0.2.22", features = ["full"]}
-futures = "0.3.5"
+tokio-postgres = { version="0.5.5", features = ["with-serde_json-1"]}
+trust-dns-resolver = "0.11.1"
 serde_postgres = "0.2.0"
 
 # We don't use this directly, but gotham pulls it in via the rust-url crate.
 # If we don't specify the exact version here cargo will bring in a newer version
 # that is not compatible with rust 1.35.
 unicode-normalization = "=0.1.5"
-crossbeam-channel = "0.4.2"
-threadpool = "1.8.1"
-num_cpus = "1.8.0"
+
+# This is brought in by tokio-postgres and was recently updated.  The update
+# caused some build issues, so we pin it here.
+subtle = "=2.2.3"
+
 
 [patch.crates-io]
 # We require the use of certain constructs which unfortunately were not
