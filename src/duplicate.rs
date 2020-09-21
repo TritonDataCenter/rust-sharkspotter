@@ -428,9 +428,9 @@ mod test {
         let mut expected_shards = vec![1, 2];
 
         let stub = MantaStub {
-            id: id.clone(),
-            key: key.clone(),
-            etag: etag.clone(),
+            id,
+            key,
+            etag,
             duplicate,
             shards,
         };
@@ -446,13 +446,8 @@ mod test {
         create_tables(&conn).expect("create tables");
         insert_stub(&stub, &conn).expect("insert stub");
 
-        let new_stub = MantaStub {
-            id,
-            key,
-            etag,
-            duplicate,
-            shards: vec![2],
-        };
+        let mut new_stub = stub.clone();
+        new_stub.shards = vec![2];
 
         let manta_value = json!({
             "somekey": "some value"
